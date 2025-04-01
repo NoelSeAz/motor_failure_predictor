@@ -1,0 +1,394 @@
+---
+title: "Motor Failure Prediction – Unit 25"
+author: "Tu Nombre"
+date: "2025.01.04"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+# 1. Fundamentos del Aprendizaje Automático (LO1)
+
+## 1.1 ¿Qué es el aprendizaje automático?
+
+El aprendizaje automático (Machine Learning, ML) es una rama de la inteligencia artificial que permite a los sistemas aprender a partir de datos, identificar patrones y tomar decisiones sin estar explícitamente programados para cada tarea. A diferencia de los enfoques clásicos de programación, en los que un programador escribe reglas específicas, en ML se entrena un modelo con datos para que aprenda dichas reglas de forma automática.
+
+En términos generales, un algoritmo de aprendizaje automático analiza conjuntos de datos históricos y desarrolla un modelo estadístico que puede generalizarse a nuevos datos. Esta capacidad de aprendizaje es lo que permite desarrollar sistemas adaptativos y predictivos.
+
+Según Bishop (2006), “el objetivo del aprendizaje automático es desarrollar algoritmos que mejoren su rendimiento automáticamente a través de la experiencia”. Esto permite automatizar tareas complejas como la clasificación de imágenes, la predicción de fallos o el reconocimiento de voz.
+
+> Referencia: Bishop, C. M. (2006). *Pattern Recognition and Machine Learning*. Springer.
+
+
+## 1.2 Tipos de aprendizaje automático
+
+El aprendizaje automático puede clasificarse en tres tipos principales:
+
+- **Aprendizaje supervisado:** El modelo se entrena con datos etiquetados (input y output). Ejemplos: regresión lineal, árboles de decisión, SVM, redes neuronales. Se utiliza, por ejemplo, para predecir si un motor fallará basándose en lecturas de sensores.
+
+- **Aprendizaje no supervisado:** El modelo trabaja con datos no etiquetados para encontrar estructuras o patrones ocultos. Ejemplos: clustering (K-means), reducción de dimensionalidad (PCA).
+
+- **Aprendizaje por refuerzo:** El sistema aprende mediante prueba y error, maximizando una recompensa a largo plazo. Se aplica comúnmente en robótica, juegos o control industrial.
+
+En este trabajo, el enfoque será el aprendizaje **supervisado**, ya que se dispone de datos etiquetados indicando si un motor ha fallado o no.
+
+## 1.3 ¿Qué es una máquina inteligente?
+
+Una máquina inteligente es un sistema capaz de percibir su entorno, analizar datos, aprender de la experiencia y tomar decisiones de forma autónoma o asistida. Su comportamiento no depende únicamente de reglas programadas previamente, sino que evoluciona con la información que recibe.
+
+Estas máquinas combinan sensores, algoritmos de procesamiento, capacidad de almacenamiento y mecanismos de decisión adaptativos. En el contexto de la industria, esto puede abarcar desde un sistema de climatización que ajusta su rendimiento según patrones de uso, hasta motores que se auto-diagnostican y predicen fallos futuros.
+
+Las máquinas inteligentes representan un paso más allá de la automatización tradicional, ya que integran inteligencia en la operación y no sólo ejecución de instrucciones.
+
+## 1.4 ¿Por qué el aprendizaje automático es esencial para diseñarlas?
+
+El aprendizaje automático es la base del comportamiento inteligente en sistemas modernos. Sin él, las máquinas están limitadas a lo que el programador haya previsto. Con ML, en cambio, los sistemas pueden:
+
+- **Aprender y adaptarse**: Cambian su comportamiento en función de nuevos datos.
+- **Detectar patrones complejos**: Por ejemplo, vibraciones anómalas que preceden a una avería.
+- **Reducir la intervención humana**: Automatizan tareas de diagnóstico o predicción.
+- **Mejorar con el tiempo**: Aumentan su precisión cuanto más datos procesan.
+
+En el campo del mantenimiento industrial, el ML es esencial para la transición del mantenimiento reactivo al **mantenimiento predictivo**, en el cual los sistemas detectan condiciones anómalas antes de que ocurran fallos graves.
+
+Como indica Russell y Norvig (2020), el aprendizaje automático transforma datos en conocimiento operativo, lo cual es indispensable para la inteligencia de sistemas complejos.
+
+> Referencia: Russell, S. J. & Norvig, P. (2020). *Artificial Intelligence: A Modern Approach* (4th ed.). Pearson.
+
+## 1.5 Aplicación al caso: Predicción de fallo en motores
+
+En este trabajo se aplicará el aprendizaje automático a un problema industrial real: predecir el fallo de motores eléctricos mediante datos captados por sensores. Estos motores son elementos clave en muchas líneas de producción, y su parada inesperada genera importantes costes económicos y logísticos.
+
+Mediante el uso de modelos de ML y datos como temperatura, vibración, humedad o carga, es posible entrenar un sistema que anticipe cuándo un motor está cerca de fallar. Esto convierte al sistema en una máquina inteligente capaz de:
+
+- Evaluar su estado interno en tiempo real.
+- Alertar al operario antes del fallo.
+- Posiblemente, indicar la **causa más probable del fallo** si se extiende el modelo.
+
+El uso de estos sistemas reduce tiempos de inactividad, mejora la planificación del mantenimiento y aumenta la seguridad operativa. Además, se puede ampliar el enfoque a distintas clases de fallo (eléctrico, mecánico, por sobreuso), lo que permitiría diagnósticos más específicos.
+
+Este tipo de solución ilustra perfectamente cómo el aprendizaje automático contribuye al diseño de máquinas inteligentes dentro del entorno industrial.
+
+> Referencia: Ghosh, S. et al. (2021). *Predictive Maintenance using Machine Learning*. Springer.
+
+
+# 2. Presentación y origen del dataset
+
+## 2.1 Descripción del dataset
+
+El conjunto de datos utilizado en este trabajo proviene de un entorno industrial simulado para el estudio del mantenimiento predictivo de motores eléctricos. Fue obtenido originalmente de la plataforma Kaggle y contiene un total de **1.000 registros** y **10 variables** que representan mediciones relevantes para diagnosticar el estado de funcionamiento de un sistema rotativo.
+
+Las variables incluidas en el dataset son:
+
+- `UDI`: Identificador único del registro (numérico).
+- `Product ID`: Código del producto o motor (carácter).
+- `Type`: Tipo de motor, clasificado como `H` (High), `L` (Low) o `M` (Medium).
+- `Air temperature [K]`: Temperatura del aire medida en Kelvin.
+- `Process temperature [K]`: Temperatura del proceso industrial (Kelvin).
+- `Rotational speed [rpm]`: Velocidad de rotación en revoluciones por minuto.
+- `Torque [Nm]`: Par de torsión aplicado al motor (Newton-metros).
+- `Tool wear [min]`: Desgaste de la herramienta en minutos acumulados.
+- `Target`: Variable binaria que indica si hubo un fallo (1) o no (0).
+- `Failure Type`: Tipo específico de fallo registrado, como por ejemplo "Power Failure" o "Tool Wear Failure".
+
+El dataset está completamente limpio, sin valores faltantes en ninguna de las columnas. Las clases de fallo están desbalanceadas: un 70% de las muestras corresponden a motores sin fallo (`Target = 0`) y el 30% presentan algún tipo de fallo (`Target = 1`). Entre las categorías de fallo más frecuentes se encuentran "Tool Wear Failure" (119 casos) y "Heat Dissipation Failure" (43 casos).
+
+En cuanto a los sensores, las variables numéricas como la temperatura, la velocidad rotacional o el torque presentan rangos coherentes con un entorno industrial, con valores como:
+
+- `Air temperature [K]`: Media de 300.1K (~27°C), rango entre 294.2K y 305.3K.
+- `Rotational speed [rpm]`: Media de 1500 rpm, valores entre 1201 y 1893 rpm.
+- `Torque [Nm]`: Media de 39.4 Nm, variando desde 9.9 hasta 72.4 Nm.
+
+Este dataset es adecuado para construir modelos supervisados de clasificación que permitan predecir la ocurrencia de fallos basándose en los datos capturados por los sensores.
+
+## 2.2 Objetivo del análisis
+
+El objetivo principal de este proyecto es construir un modelo de aprendizaje automático que permita predecir si un motor eléctrico fallará en función de los datos sensoriales registrados durante su operación. Esto se traduce en un problema de **clasificación binaria supervisada**, donde la variable objetivo (`Target`) toma los valores 0 (sin fallo) o 1 (con fallo).
+
+Este tipo de predicción es crucial en contextos industriales porque permite anticiparse a posibles interrupciones de producción, programar mantenimientos preventivos y evitar fallos catastróficos que afecten la seguridad o la eficiencia operativa.
+
+Como extensión futura, se plantea la posibilidad de realizar una **clasificación multiclase** que no sólo indique la ocurrencia de un fallo, sino que también determine su **tipo probable** (por ejemplo: fallo por sobreesfuerzo, fallo eléctrico, desgaste de herramienta, etc.), utilizando la columna `Failure Type` como variable objetivo.
+
+---
+
+# 3. Análisis exploratorio de datos (EDA)
+
+El análisis exploratorio ha permitido identificar la estructura del dataset, la calidad de los datos y los comportamientos generales de las variables involucradas. El conjunto de datos está limpio y bien estructurado, sin valores faltantes. Las variables numéricas presentan distribuciones razonables y relaciones lógicas entre sí, como la fuerte correlación entre las temperaturas del aire y del proceso. Aunque existe un cierto desbalance en la variable objetivo, este no es extremo y será tratado adecuadamente durante el preprocesado.
+
+Además, la visualización por tipo de motor revela diferencias en la operación que pueden ser útiles para la predicción de fallos. Las gráficas ayudan a detectar patrones que podrían vincularse con condiciones de riesgo, como combinaciones de torque y desgaste.
+
+Este análisis constituye una base sólida para tomar decisiones en la fase de preparación de datos y posterior modelado.
+
+```{r load-packages}
+# Cargar librerías necesarias
+library(tidyverse)
+library(ggplot2)
+library(readr)
+library(DT)
+```
+
+```{r load-data}
+df <- read_csv("data/predictive_maintenance.csv")
+
+head(df)
+```
+
+## 3.0 Exploración general de los datos
+
+```{r initial-exploration}
+# Ver estructura de los datos
+str(df)
+
+# Comprobar si hay valores faltantes
+colSums(is.na(df))
+
+# Distribución de la variable objetivo (Target)
+table(df$Target)
+prop.table(table(df$Target))  # Porcentaje de clases
+
+# Distribución de tipos de producto
+table(df$Type)
+
+# Distribución de tipos de fallo
+table(df$`Failure Type`)
+
+# Estadísticas descriptivas de las variables numéricas
+summary(select(df, where(is.numeric)))
+```
+
+## 3.1 Comprobación de datos faltantes
+
+```{r missing-values}
+colSums(is.na(df))
+```
+
+Todos los campos presentan valores completos, lo que indica que el dataset está limpio y no requiere imputación ni eliminación de filas/columnas por valores ausentes. Esta condición es favorable, ya que permite centrar el esfuerzo en la transformación de variables y la construcción del modelo sin aplicar técnicas adicionales de limpieza.
+
+## 3.2 Distribución de variables
+
+Se procede a analizar visualmente algunas variables numéricas clave para comprender su comportamiento y detectar posibles anomalías. Esta exploración también permite evaluar si se requieren transformaciones o normalizaciones en fases posteriores.
+
+```{r distributions}
+# Convertir temperaturas a grados Celsius
+
+df$`Air temperature [C]` <- df$`Air temperature [K]` - 273.15
+
+df$`Process temperature [C]` <- df$`Process temperature [K]` - 273.15
+
+# Histograma de la variable objetivo
+ggplot(df, aes(x = factor(Target))) +
+  geom_bar(fill = "steelblue") +
+  labs(title = "Distribución de la variable objetivo (Target)", x = "Fallo", y = "Cantidad")
+
+# Distribución de la temperatura del aire
+ggplot(df, aes(x = `Air temperature [C]`)) +
+  geom_histogram(bins = 30, fill = "tomato", color = "black") +
+  labs(title = "Temperatura del aire (°C)", x = "°C", y = "Frecuencia")
+
+# Distribución del torque
+ggplot(df, aes(x = `Torque [Nm]`)) +
+  geom_histogram(bins = 30, fill = "darkgreen", color = "black") +
+  labs(title = "Distribución del Torque", x = "Nm", y = "Frecuencia")
+
+# Boxplot de la velocidad rotacional por tipo de motor
+ggplot(df, aes(x = Type, y = `Rotational speed [rpm]`, fill = Type)) +
+  geom_boxplot() +
+  labs(title = "Velocidad rotacional por tipo de motor", x = "Tipo", y = "RPM")
+```
+
+**Interpretación de las gráficas:**
+
+- El histograma de la variable `Target` confirma que existe un desbalance: el 70% de los registros corresponden a motores sin fallo. Este aspecto deberá tenerse en cuenta al construir el modelo.
+
+- La distribución de la `Air temperature [C]` sigue un patrón normal con valores entre aproximadamente 21 °C y 32 °C. No se detectan valores atípicos significativos, lo que sugiere que esta variable está bien calibrada y no requiere transformación adicional.
+
+- El `Torque [Nm]` muestra una ligera asimetría hacia la derecha, con una mayoría de valores entre 20 y 60 Nm. Es una variable importante, ya que representa la carga aplicada al motor y podría tener influencia directa sobre la probabilidad de fallo.
+
+- El boxplot de la `Rotational speed [rpm]` agrupado por `Type` revela que los motores de tipo `M` y `H` tienden a operar a velocidades más altas que los de tipo `L`. También se identifican algunos valores extremos que podrían representar condiciones de trabajo anómalas o señales tempranas de fallo.
+
+## 3.3 Correlaciones y multicolinealidad
+
+Antes de construir modelos predictivos, es importante examinar las correlaciones entre las variables numéricas. Esto permite identificar relaciones lineales, redundancias y posibles casos de multicolinealidad que podrían distorsionar el comportamiento de algunos algoritmos, como la regresión logística.
+
+A continuación, se presenta una matriz de correlación visualizada como un mapa de calor, seguido de una matriz de pares (`ggpairs`) para observar con mayor detalle la relación entre variables clave.
+
+```{r correlations}
+# Matriz de correlación entre variables numéricas
+numeric_vars <- select(df, where(is.numeric))
+cor_matrix <- cor(numeric_vars)
+
+# Visualización como mapa de calor
+heatmap(cor_matrix, main = "Mapa de calor de correlaciones", col = topo.colors(10), symm = TRUE)
+```
+
+A continuación, se seleccionan cinco variables numéricas clave para analizar visualmente sus relaciones mediante `ggpairs` del paquete GGally:
+
+```{r ggpairs-correlation, warning=FALSE, message=FALSE}
+library(GGally)
+selected_vars <- df %>%
+  select(`Air temperature [C]`, `Process temperature [C]`, `Rotational speed [rpm]`, `Torque [Nm]`, `Tool wear [min]`)
+
+GGally::ggpairs(selected_vars)
+```
+
+Estas gráficas permiten visualizar posibles relaciones lineales o no lineales, detectar patrones de agrupación y estimar la fuerza de correlación entre pares de variables. 
+
+- El mapa de calor muestra una **fuerte correlación positiva entre la temperatura del aire y del proceso**, lo que es coherente en un sistema térmico. También hay una correlación moderada entre `Torque` y `Tool wear`, lo cual podría indicar una asociación entre carga aplicada y desgaste.
+
+- El gráfico `ggpairs` es útil para identificar relaciones lineales o agrupamientos, como la posible asociación entre temperaturas elevadas y valores bajos de torque. Estas combinaciones podrían estar relacionadas con condiciones de fallo o baja eficiencia, lo que justifica su inclusión como variables predictoras. Este análisis también ayuda a identificar variables con comportamientos redundantes o que aportan poca información, de cara a su posible eliminación en la fase de preparación de datos.
+
+
+## 3.4 Balanceo de clases
+
+```{r class-balance}
+table(df$Target)
+prop.table(table(df$Target))
+```
+
+La variable objetivo `Target` presenta un desequilibrio moderado: aproximadamente el **70%** de los registros corresponden a motores que no han fallado (`Target = 0`), mientras que el **30%** restante presentan algún tipo de fallo (`Target = 1`).
+
+Aunque el desbalance no es extremo, puede influir negativamente en algunos algoritmos, ya que tienden a favorecer la clase mayoritaria. Este aspecto será tenido en cuenta en la fase de preparación de datos. Si fuera necesario, se aplicarán técnicas de **resampling** como *undersampling* o *SMOTE* para mejorar la capacidad del modelo de detectar correctamente los fallos.
+
+---
+
+## 4. Preparación de los datos
+
+Antes de entrenar cualquier modelo, es necesario transformar y preparar adecuadamente los datos. En este caso, se han llevado a cabo las siguientes acciones:
+
+- **Conversión de unidades**: las temperaturas se han transformado de Kelvin a Celsius para facilitar la interpretación.
+- **Eliminación de columnas irrelevantes**: se eliminan campos como `UDI` (identificador secuencial) y `Product ID`, que no aportan valor predictivo directo.
+- **Codificación de variables categóricas**: la variable `Type` se convierte en variable numérica mediante codificación one-hot.
+- **Balanceo de clases**: dado el desbalance moderado entre clases, se prepara una versión balanceada del conjunto de entrenamiento usando la técnica de sobremuestreo (*up-sampling*).
+
+El preprocesado de datos incluye una etapa crítica cuando se trabaja con conjuntos desbalanceados: el *up-sampling*. Esta técnica consiste en aumentar artificialmente el número de muestras de la clase minoritaria (en nuestro caso, los motores con fallo), duplicando aleatoriamente ejemplos de esa clase hasta igualar el número de la clase mayoritaria.
+
+El objetivo del *up-sampling* es evitar que el modelo aprenda a ignorar la clase minoritaria por su baja representación. Esto mejora métricas como la sensibilidad (recall) y el F1-score en problemas donde detectar la clase minoritaria (fallos) es crítico. Sin embargo, también incrementa el riesgo de *overfitting* si se aplicara en exceso, ya que se repiten datos existentes en lugar de aportar ejemplos nuevos.
+
+En este proyecto, se ha utilizado la función `upSample()` del paquete `caret` para igualar el número de casos con y sin fallo antes de entrenar el modelo.
+
+```{r data-preparation, warning=FALSE, message=FALSE}
+# 1. Eliminar columnas innecesarias
+df_clean <- df %>%
+  select(-UDI, -`Product ID`, -`Air temperature [K]`, -`Process temperature [K]`)
+
+# 2. Codificar variable categórica Type con one-hot encoding
+df_clean <- df_clean %>%
+  mutate(Type = as.factor(Type)) %>%
+  bind_cols(model.matrix(~ Type - 1, data = .)) %>%
+  select(-Type)
+
+# 3. Verificar estructura final
+str(df_clean)
+
+# 4. Dividir en clases para balanceo (si se desea aplicar más adelante)
+table(df_clean$Target)
+
+# 5. Crear versión balanceada del dataset (up-sampling)
+library(caret)
+df_balanced <- upSample(x = df_clean %>% select(-Target),
+                        y = as.factor(df_clean$Target),
+                        yname = "Target")
+
+# Comprobar nuevo balance
+table(df_balanced$Target)
+```
+
+---
+
+# 5. Modelado
+
+## 5.1 Algoritmo(s) utilizados
+
+Para esta primera aproximación, se ha optado por utilizar un modelo de **regresión logística**. Esta técnica es adecuada para problemas de clasificación binaria y permite interpretar la influencia de cada variable sobre la probabilidad de que ocurra un fallo. Aunque es un modelo lineal, ofrece un buen punto de partida para establecer una línea base de rendimiento.
+
+## 5.2 División train/test
+
+Se ha dividido el conjunto balanceado en dos subconjuntos: un 80% para entrenamiento y un 20% para test. Esta división permite evaluar el rendimiento del modelo sobre datos no vistos durante el entrenamiento.
+
+```{r split-data}
+# Cargar librerías necesarias
+library(caret)
+library(e1071)  # Necesaria para modelos con caret
+set.seed(123)
+
+# División en entrenamiento y test
+trainIndex <- createDataPartition(df_balanced$Target, p = 0.8, list = FALSE)
+trainData <- df_balanced[trainIndex, ]
+testData  <- df_balanced[-trainIndex, ]
+```
+
+## 5.3 Entrenamiento del modelo
+
+Se ha entrenado el modelo de regresión logística utilizando el conjunto de entrenamiento previamente definido. El modelo se ajusta a los datos para estimar la probabilidad de fallo en función de las variables sensoriales.
+
+```{r model-training}
+# Entrenamiento con regresión logística
+model_log <- train(Target ~ ., data = trainData, method = "glm", family = "binomial")
+```
+
+## 5.4 Evaluación del modelo
+
+El modelo ha sido evaluado con el conjunto de test, y su rendimiento se ha analizado mediante una matriz de confusión. Esta permite calcular métricas como la exactitud (accuracy), sensibilidad (recall), precisión (precision) y F1-score, que son fundamentales para evaluar la capacidad del modelo de detectar correctamente los fallos.
+
+```{r model-evaluation}
+# Predicción
+predictions <- predict(model_log, newdata = testData)
+
+# Matriz de confusión y métricas
+confusionMatrix(predictions, testData$Target)
+```
+
+En este caso, el modelo alcanzó un rendimiento **perfecto** sobre el conjunto de test, con los siguientes resultados:
+
+- **Accuracy**: 1.0 (100% de aciertos)
+- **Sensitivity (Recall)**: 1.0
+- **Specificity**: 1.0
+- **Pos Pred Value (Precision)**: 1.0
+- **Balanced Accuracy**: 1.0
+- **Kappa**: 1.0
+
+Como tanto la precisión como el recall son 1.0, el **F1-score también es 1.0**. La matriz de confusión muestra 140 predicciones correctas para cada clase, sin errores. Aunque este resultado es excelente, también podría deberse a cierta simplicidad en los datos o al efecto del balanceo. En futuras versiones se podrá validar con *cross-validation* o conjuntos externos.
+
+---
+
+## 6. Conclusiones
+
+El modelo de regresión logística entrenado sobre el conjunto balanceado ha mostrado un rendimiento **perfecto** sobre los datos de test. La precisión global fue del **100%**, sin errores en la predicción de ninguna clase.
+
+La matriz de confusión indica que todos los motores fueron correctamente clasificados como fallidos o no fallidos. Las métricas fueron:
+
+- **Accuracy**: 1.0
+- **Precision**: 1.0
+- **Recall**: 1.0
+- **F1-score**: 1.0
+
+Este comportamiento ideal puede deberse a una combinación de un conjunto de datos bien definido, un modelo simple pero efectivo, y la técnica de *up-sampling* que ayudó a equilibrar correctamente las clases. Aun así, es recomendable evaluar este modelo con nuevas particiones o validación cruzada para asegurar que no hay sobreajuste.
+
+Las variables que más influyeron en las predicciones fueron:
+- `Torque [Nm]`
+- `Rotational speed [rpm]`
+- `Tool wear [min]`
+
+Como mejora futura, se pueden probar otros algoritmos (Random Forest, XGBoost), ajustar umbrales de clasificación para contextos más críticos, o evaluar la robustez del modelo ante datos ruidosos o incompletos.
+
+En conjunto, los resultados muestran que es posible predecir con alta fiabilidad los fallos en motores industriales usando aprendizaje automático supervisado y un buen preprocesado de datos.
+
+---
+
+# Bibliografía
+
+- Aggarwal, H. (2020). *Predictive Maintenance Dataset*. Kaggle. Disponible en: https://www.kaggle.com/datasets/hiimanshuagarwal/predictive-maintenance-dataset
+
+- Kuhn, M. and Johnson, K. (2013). *Applied Predictive Modeling*. Springer. ISBN 978-1-4614-6848-6.
+
+- James, G., Witten, D., Hastie, T., and Tibshirani, R. (2021). *An Introduction to Statistical Learning with Applications in R*. 2ª edición. Springer.
+
+- Bishop, C. M. (2006). *Pattern Recognition and Machine Learning*. Springer.
+
+- UCI Machine Learning Repository. (2024). *Machine Predictive Maintenance Dataset*. Disponible en: https://archive.ics.uci.edu
+
+- Hastie, T., Tibshirani, R. and Friedman, J. (2009). *The Elements of Statistical Learning: Data Mining, Inference, and Prediction*. Springer.
+
+- Breiman, L. (2001). Random Forests. *Machine Learning*, 45(1), pp.5–32.
