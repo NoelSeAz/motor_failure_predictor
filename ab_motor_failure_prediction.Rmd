@@ -233,12 +233,13 @@ selected_vars <- df %>%
 GGally::ggpairs(selected_vars)
 ```
 
-Estas gráficas permiten visualizar posibles relaciones lineales o no lineales, detectar patrones de agrupación y estimar la fuerza de correlación entre pares de variables. 
+### Interpretación:
 
-- El mapa de calor muestra una **fuerte correlación positiva entre la temperatura del aire y del proceso**, lo que es coherente en un sistema térmico. También hay una correlación moderada entre `Torque` y `Tool wear`, lo cual podría indicar una asociación entre carga aplicada y desgaste.
+El **mapa de calor** confirma que no existen correlaciones elevadas entre las variables predictoras del modelo. Las únicas relaciones fuertes son las esperables entre `Air temperature [K]` y `[C]`, y entre `Process temperature [K]` y `[C]`, ya que son conversiones entre sí. La columna `UDI`, como identificador secuencial, no aporta información predictiva útil, lo que justifica su eliminación posterior.
 
-- El gráfico `ggpairs` es útil para identificar relaciones lineales o agrupamientos, como la posible asociación entre temperaturas elevadas y valores bajos de torque. Estas combinaciones podrían estar relacionadas con condiciones de fallo o baja eficiencia, lo que justifica su inclusión como variables predictoras. Este análisis también ayuda a identificar variables con comportamientos redundantes o que aportan poca información, de cara a su posible eliminación en la fase de preparación de datos.
+La matriz `ggpairs` permite observar visualmente estas relaciones. Las gráficas de dispersión muestran nubes de puntos muy dispersas, sin tendencias claras, lo que indica **correlaciones próximas a cero** y **baja redundancia entre variables**. Esto es positivo desde el punto de vista del modelado, ya que cada variable podría aportar información distinta al modelo sin causar problemas de multicolinealidad.
 
+En conjunto, estos resultados sugieren que el conjunto de variables es adecuado para entrenar modelos estadísticos o de aprendizaje automático sin necesidad de aplicar técnicas de reducción de dimensionalidad o eliminación por colinealidad.
 
 ## 3.4 Balanceo de clases
 
