@@ -1,6 +1,6 @@
 ---
 title: "Motor Failure Prediction – Unit 25"
-author: "Tu Nombre"
+author: "Noel Sebastia"
 date: "2025.01.04"
 output: html_notebook
 ---
@@ -375,6 +375,12 @@ Las variables que más influyeron en las predicciones fueron:
 Como mejora futura, se pueden probar otros algoritmos (Random Forest, XGBoost), ajustar umbrales de clasificación para contextos más críticos, o evaluar la robustez del modelo ante datos ruidosos o incompletos.
 
 En conjunto, los resultados muestran que es posible predecir con alta fiabilidad los fallos en motores industriales usando aprendizaje automático supervisado y un buen preprocesado de datos.
+
+En la siguiente fase del proyecto, se pretende extender el análisis hacia la predicción del tipo específico de fallo (`Failure Type`). Para ello, se plantea:
+- Tratar `Failure Type` como una variable categórica (`factor`) y aplicar clasificación multiclase.
+- Evaluar modelos como **Naive Bayes** para detectar patrones específicos.
+- Usar **series temporales** si se dispone de datos secuenciales, lo que permitiría anticipar el fallo.
+- Explorar la **teoría de colas** para modelar tiempos de espera y eficiencia del mantenimiento en entornos industriales.
 
 ---
 
