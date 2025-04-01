@@ -78,7 +78,7 @@ Este tipo de solución ilustra perfectamente cómo el aprendizaje automático co
 
 ## 2.1 Descripción del dataset
 
-El conjunto de datos utilizado en este trabajo proviene de un entorno industrial simulado para el estudio del mantenimiento predictivo de motores eléctricos. Fue obtenido originalmente de la plataforma Kaggle y contiene un total de **1.000 registros** y **10 variables** que representan mediciones relevantes para diagnosticar el estado de funcionamiento de un sistema rotativo.
+El conjunto de datos utilizado en este trabajo proviene de un entorno industrial simulado diseñado para el estudio del mantenimiento predictivo en sistemas rotativos. Fue obtenido del repositorio oficial UCI Machine Learning Repository (AI4I 2020 Predictive Maintenance Dataset) y contiene un total de 1.000 registros y 10 variables que representan mediciones relevantes para diagnosticar el estado de funcionamiento de un sistema rotativo o motor.
 
 Las variables incluidas en el dataset son:
 
@@ -378,8 +378,6 @@ En conjunto, los resultados muestran que es posible predecir con alta fiabilidad
 ---
 
 # Bibliografía
-
-- Aggarwal, H. (2020). *Predictive Maintenance Dataset*. Kaggle. Disponible en: https://www.kaggle.com/datasets/hiimanshuagarwal/predictive-maintenance-dataset
 
 - Kuhn, M. and Johnson, K. (2013). *Applied Predictive Modeling*. Springer. ISBN 978-1-4614-6848-6.
 
