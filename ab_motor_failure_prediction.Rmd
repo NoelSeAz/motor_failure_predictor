@@ -223,7 +223,7 @@ cor_matrix <- cor(numeric_vars)
 heatmap(cor_matrix, main = "Mapa de calor de correlaciones", col = topo.colors(10), symm = TRUE)
 ```
 
-A continuación, se seleccionan cinco variables numéricas clave para analizar visualmente sus relaciones mediante `ggpairs` del paquete GGally:
+Seguidamente, se seleccionan cinco variables numéricas clave para analizar visualmente sus relaciones mediante `ggpairs` del paquete GGally:
 
 ```{r ggpairs-correlation, warning=FALSE, message=FALSE}
 library(GGally)
@@ -254,13 +254,13 @@ Aunque el desbalance no es extremo, puede influir negativamente en algunos algor
 
 ---
 
-## 4. Preparación de los datos
+# 4. Preparación de los datos
 
 Antes de entrenar cualquier modelo, es necesario transformar y preparar adecuadamente los datos. En este caso, se han llevado a cabo las siguientes acciones:
 
 - **Conversión de unidades**: las temperaturas se han transformado de Kelvin a Celsius para facilitar la interpretación.
 - **Eliminación de columnas irrelevantes**: se eliminan campos como `UDI` (identificador secuencial) y `Product ID`, que no aportan valor predictivo directo.
-- **Codificación de variables categóricas**: la variable `Type` se convierte en variable numérica mediante codificación one-hot.
+- **Tratamiento de variables categóricas**: inicialmente, la variable Type se codificó mediante one-hot encoding para utilizarla en modelos lineales. Sin embargo, esta estrategia puede introducir redundancias y problemas de multicolinealidad, especialmente cuando las categorías no tienen una relación ordinal. Tras revisar esta parte del preprocesado y considerando observaciones realizadas durante el proceso de evaluación, se ha optado por tratar Type como una variable de tipo factor, lo que permite al modelo interpretar su carácter categórico de forma más directa y eficiente.
 - **Balanceo de clases**: dado el desbalance moderado entre clases, se prepara una versión balanceada del conjunto de entrenamiento usando la técnica de sobremuestreo (*up-sampling*).
 
 El preprocesado de datos incluye una etapa crítica cuando se trabaja con conjuntos desbalanceados: el *up-sampling*. Esta técnica consiste en aumentar artificialmente el número de muestras de la clase minoritaria (en nuestro caso, los motores con fallo), duplicando aleatoriamente ejemplos de esa clase hasta igualar el número de la clase mayoritaria.
@@ -274,16 +274,13 @@ En este proyecto, se ha utilizado la función `upSample()` del paquete `caret` p
 df_clean <- df %>%
   select(-UDI, -`Product ID`, -`Air temperature [K]`, -`Process temperature [K]`)
 
-# 2. Codificar variable categórica Type con one-hot encoding
-df_clean <- df_clean %>%
-  mutate(Type = as.factor(Type)) %>%
-  bind_cols(model.matrix(~ Type - 1, data = .)) %>%
-  select(-Type)
+# 2. Codificar la variable categórica 'Type' como factor (en lugar de one-hot encoding)
+df_clean$Type <- as.factor(df_clean$Type)
 
 # 3. Verificar estructura final
 str(df_clean)
 
-# 4. Dividir en clases para balanceo (si se desea aplicar más adelante)
+# 4. Dividir en clases para balanceo
 table(df_clean$Target)
 
 # 5. Crear versión balanceada del dataset (up-sampling)
@@ -295,6 +292,34 @@ df_balanced <- upSample(x = df_clean %>% select(-Target),
 # Comprobar nuevo balance
 table(df_balanced$Target)
 ```
+
+## 4.1 Verificación de multicolinealidad tras el preprocesado
+
+Una vez creado el conjunto balanceado de datos (`df_balanced`), se ha procedido a comprobar la **multicolinealidad entre predictores** mediante el cálculo del **Variance Inflation Factor (VIF)**. Este análisis es clave antes de entrenar modelos lineales, ya que la presencia de colinealidad puede afectar negativamente tanto al ajuste como a la interpretación de los coeficientes del modelo.
+
+El análisis se ha realizado utilizando el conjunto balanceado completo, justo antes de dividir en entrenamiento y test. En el caso de variables categóricas como `Type` y `Failure Type`, el modelo calcula el **Generalized VIF (GVIF)**, que se ajusta en función del número de niveles del factor. Para interpretar correctamente estos valores, se utiliza la transformación estándar `GVIF^(1/(2*Df))`.
+
+
+```{r vif-after-preprocessing}
+library(car)
+model_vif <- glm(Target ~ ., data = df_balanced, family = binomial())
+vif_values <- vif(model_vif)
+print(vif_values)
+```
+
+Resumen de los valores ajustados de VIF (GVIF^(1/(2*Df))):
+
+- **Type**: 1.009
+- **Rotational speed [rpm]**: 1.011
+- **Torque [Nm]**: 1.009
+- **Tool wear [min]**: 1.008
+- **Failure Type**: 1.007
+- **Air temperature [C]**: 1.009
+- **Process temperature [C]**: 1.011
+
+Todos los valores se sitúan muy cerca de 1, lo cual indica una muy baja colinealidad entre predictores. De hecho, ninguno de ellos supera el umbral habitual de 5 que indicaría problemas moderados, ni mucho menos el valor 10 que señalaría multicolinealidad severa.
+
+Este resultado permite confirmar que las variables seleccionadas en el conjunto balanceado son suficientemente independientes entre sí desde el punto de vista estadístico. Por tanto, no se considera necesario eliminar ni transformar ninguna de ellas en esta etapa. El modelo de regresión logística podrá entrenarse con confianza en que sus predictores no presentan redundancia significativa.
 
 ---
 
@@ -352,9 +377,72 @@ En este caso, el modelo alcanzó un rendimiento **perfecto** sobre el conjunto d
 
 Como tanto la precisión como el recall son 1.0, el **F1-score también es 1.0**. La matriz de confusión muestra 140 predicciones correctas para cada clase, sin errores. Aunque este resultado es excelente, también podría deberse a cierta simplicidad en los datos o al efecto del balanceo. En futuras versiones se podrá validar con *cross-validation* o conjuntos externos.
 
+## 5.5 Evaluación del riesgo de overfitting
+
+Aunque el modelo de regresión logística alcanza una precisión perfecta del 100% sobre el conjunto de test, este resultado debe ser interpretado con cautela. En contextos reales, una predicción sin errores es poco frecuente y puede ser indicativa de **sobreajuste** (*overfitting*), especialmente cuando se ha utilizado *up-sampling*, que consiste en duplicar instancias de la clase minoritaria para equilibrar el dataset.
+
+Para verificar si el modelo está sobreajustado o si realmente generaliza bien, se ha llevado a cabo una **validación cruzada de 10 particiones (10-fold cross-validation)**. Esta técnica entrena el modelo en diferentes subconjuntos del dataset (`df_balanced`) y valida su rendimiento en particiones independientes, proporcionando una evaluación más robusta que una sola división *train/test*.
+
+```{r overfitting-evaluation}
+library(caret)
+
+# Control con validación cruzada de 10 particiones
+train_control <- trainControl(method = "cv", number = 10)
+
+# Entrenar modelo con CV
+model_cv <- train(Target ~ ., data = df_balanced, 
+                  method = "glm", family = "binomial",
+                  trControl = train_control)
+
+print(model_cv)
+```
+
+Los resultados muestran un **Accuracy (media)**: 1.00 y un valor **Kappa**: 1.00.
+
+Estos valores confirman que el modelo mantiene un rendimiento perfecto incluso bajo validación cruzada, lo cual refuerza su consistencia. No obstante, este comportamiento podría deberse a ciertas características del dataset, como una **alta separabilidad entre clases**, un **diseño experimental simulado** o la **limpieza extrema de los datos**.
+
+Aunque los resultados sugieren que el modelo actual generaliza muy bien en este contexto, no puede descartarse completamente la posibilidad de sobreajuste, dado que el balanceo mediante duplicación puede facilitar que el modelo memorice patrones específicos.
+
+Para validar su robustez en escenarios más realistas, se recomienda en futuras iteraciones evaluar el modelo sobre un conjunto externo real no balanceado, comparar con otros algoritmos más complejos (Random Forest, XGBoost) y/o analizar la estabilidad del modelo ante ruido o registros incompletos.
+
+Este enfoque permitirá comprobar su aplicabilidad en entornos industriales reales, donde los datos no siempre cumplen condiciones ideales.
+
+## 5.6 Análisis de residuos: homocedasticidad y linealidad
+
+Este paso es fundamental para comprobar si se cumplen dos supuestos clave de los modelos lineales (como la regresión logística):
+
+- **Linealidad** aproximada entre predictores y el logit de la variable objetivo.  
+- **Homocedasticidad**, es decir, que los residuos tengan una varianza constante y estén distribuidos aleatoriamente.
+
+Aunque la regresión logística no exige estrictamente homocedasticidad como en la regresión lineal, analizar los residuos permite identificar posibles problemas como outliers, colinealidad oculta o errores de especificación en el modelo.
+
+Para ello, se ha representado el gráfico de **residuos deviance frente a los valores ajustados** del modelo:
+
+```{r residual-analysis}
+# Calcular residuos y valores ajustados
+model_res <- glm(Target ~ ., data = trainData, family = binomial())
+res <- residuals(model_res, type = "deviance")
+fitted_vals <- fitted(model_res)
+
+# Gráfico de residuos vs valores ajustados
+plot(fitted_vals, res,
+     xlab = "Valores ajustados",
+     ylab = "Residuos deviance",
+     main = "Residuos vs Valores ajustados")
+abline(h = 0, col = "red")
+```
+
+El gráfico muestra únicamente dos puntos extremos con residuos prácticamente nulos. Esto confirma que el modelo ha clasificado las observaciones sin error alguno, y que los residuos deviance están casi exactamente en cero.
+
+Aunque el análisis gráfico no revela problemas de linealidad ni homocedasticidad, el resultado es inusualmente ideal. Por ello, es recomendable evaluar el modelo sobre un conjunto con ruido o datos reales no balanceados, complementar este análisis con residuos estandarizados e influencia de observaciones (p.ej., leverage o Cook’s distance) y considerar modelos alternativos o ensambles para comprobar la robustez de los resultados.
+
+A pesar de su perfección técnica, el gráfico de residuos debe interpretarse en el contexto de todo el análisis previo, especialmente junto al rendimiento perfecto observado en test y en validación cruzada.
+
 ---
 
 ## 6. Conclusiones
+
+### Primera Entrega Intermedia:
 
 El modelo de regresión logística entrenado sobre el conjunto balanceado ha mostrado un rendimiento **perfecto** sobre los datos de test. La precisión global fue del **100%**, sin errores en la predicción de ninguna clase.
 
@@ -381,6 +469,24 @@ En la siguiente fase del proyecto, se pretende extender el análisis hacia la pr
 - Evaluar modelos como **Naive Bayes** para detectar patrones específicos.
 - Usar **series temporales** si se dispone de datos secuenciales, lo que permitiría anticipar el fallo.
 - Explorar la **teoría de colas** para modelar tiempos de espera y eficiencia del mantenimiento en entornos industriales.
+
+### Segunda Entrega Intermedia:
+
+En esta segunda entrega intermedia se han aplicado mejoras sustanciales al proyecto de predicción de fallos en motores eléctricos, partiendo de las observaciones recibidas en la primera evaluación. En particular, se corrigió el tratamiento de la variable `Type`, que en lugar de ser codificada mediante *one-hot encoding*, se ha tratado como un factor categórico, reduciendo así posibles problemas de colinealidad y mejorando la interpretación del modelo.
+
+Además, se ha incorporado un análisis completo de la **multicolinealidad** utilizando el **Variance Inflation Factor (VIF)**, que ha confirmado que no existen redundancias estadísticas significativas entre los predictores. También se han evaluado los **residuos deviance** del modelo, mostrando una dispersión homogénea alrededor de cero sin patrones visibles, lo que indica que se cumplen razonablemente los supuestos de linealidad y homocedasticidad.
+
+En cuanto al rendimiento del modelo, tanto la evaluación en el conjunto de test como la **validación cruzada de 10 particiones** han mostrado resultados perfectos, con una precisión (accuracy) y una medida de concordancia (Kappa) de 1.00. Si bien esto puede indicar un modelo altamente efectivo, también plantea dudas razonables sobre un posible **sobreajuste**, especialmente debido al uso de *up-sampling*, que puede favorecer la memorización de patrones.
+
+Por tanto, aunque los resultados son técnicamente sólidos y estadísticamente coherentes, se recomienda mantener una visión crítica y ampliar el análisis en futuras fases del proyecto. Entre las posibles líneas de desarrollo se incluyen:
+
+- Evaluar el modelo sobre un conjunto externo real no balanceado.
+- Explorar algoritmos más complejos y robustos, como Random Forest o XGBoost.
+- Extender el análisis a una clasificación multiclase basada en la variable `Failure Type`.
+- Analizar la sensibilidad del modelo ante datos con ruido o registros incompletos.
+- Incorporar métricas complementarias como curvas ROC, AUC o precisión-recall.
+
+En conjunto, se concluye que el modelo actual proporciona una **base muy sólida** para la predicción de fallos en entornos industriales simulados, y sienta las bases para su validación y refinamiento en escenarios más realistas y exigentes.
 
 ---
 
