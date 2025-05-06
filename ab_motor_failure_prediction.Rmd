@@ -2,7 +2,9 @@
 title: "Motor Failure Prediction – Unit 25"
 author: "Noel Sebastia"
 date: "2025.01.04"
-output: html_notebook
+output:
+  html_notebook: default
+  pdf_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -115,153 +117,137 @@ Como extensión futura, se plantea la posibilidad de realizar una **clasificaci�
 
 # 3. Análisis exploratorio de datos (EDA)
 
-El análisis exploratorio ha permitido identificar la estructura del dataset, la calidad de los datos y los comportamientos generales de las variables involucradas. El conjunto de datos está limpio y bien estructurado, sin valores faltantes. Las variables numéricas presentan distribuciones razonables y relaciones lógicas entre sí, como la fuerte correlación entre las temperaturas del aire y del proceso. Aunque existe un cierto desbalance en la variable objetivo, este no es extremo y será tratado adecuadamente durante el preprocesado.
+Este apartado tiene como objetivo comprender el comportamiento de las variables del dataset y justificar cada decisión tomada antes de construir el modelo predictivo. Cada gráfico se incluye con una intención específica: evaluar la calidad de los datos, detectar patrones relevantes para la predicción o anticipar decisiones de preprocesado.
 
-Además, la visualización por tipo de motor revela diferencias en la operación que pueden ser útiles para la predicción de fallos. Las gráficas ayudan a detectar patrones que podrían vincularse con condiciones de riesgo, como combinaciones de torque y desgaste.
-
-Este análisis constituye una base sólida para tomar decisiones en la fase de preparación de datos y posterior modelado.
-
-```{r load-packages}
+```{r load-data}
 # Cargar librerías necesarias
 library(tidyverse)
 library(ggplot2)
 library(readr)
 library(DT)
-```
 
-```{r load-data}
 df <- read_csv("data/predictive_maintenance.csv")
 
 head(df)
 ```
 
-## 3.0 Exploración general de los datos
+La tabla anterior muestra las primeras filas del dataset, lo que permite una primera inspección visual de su estructura. Se observan variables numéricas como Rotational speed [rpm], Torque [Nm] o Tool wear [min], así como variables categóricas (Type) e identificadores (UDI, Product ID). Esta revisión inicial permite identificar rápidamente el tipo de datos presentes, su formato y si contienen valores anómalos evidentes.
 
-```{r initial-exploration}
-# Ver estructura de los datos
-str(df)
+## 3.1 Estructura y limpieza de datos
 
-# Comprobar si hay valores faltantes
-colSums(is.na(df))
+Antes de aplicar cualquier técnica de análisis o modelado, es fundamental **verificar la integridad del dataset**, especialmente la presencia de valores faltantes. Esto permite determinar si es necesario aplicar métodos de imputación, eliminar registros incompletos o si se puede continuar con el conjunto de datos tal como está.
 
-# Distribución de la variable objetivo (Target)
-table(df$Target)
-prop.table(table(df$Target))  # Porcentaje de clases
-
-# Distribución de tipos de producto
-table(df$Type)
-
-# Distribución de tipos de fallo
-table(df$`Failure Type`)
-
-# Estadísticas descriptivas de las variables numéricas
-summary(select(df, where(is.numeric)))
-```
-
-## 3.1 Comprobación de datos faltantes
-
-```{r missing-values}
+```{r load-packages}
 colSums(is.na(df))
 ```
 
-Todos los campos presentan valores completos, lo que indica que el dataset está limpio y no requiere imputación ni eliminación de filas/columnas por valores ausentes. Esta condición es favorable, ya que permite centrar el esfuerzo en la transformación de variables y la construcción del modelo sin aplicar técnicas adicionales de limpieza.
+La salida de este comando indica que **no existen valores NA en ninguna de las columnas**. Por tanto, se confirma que el dataset está completamente limpio en cuanto a datos ausentes, lo cual simplifica el proceso de preprocesado posterior y evita posibles sesgos derivados de imputaciones artificiales.
 
-## 3.2 Distribución de variables
+## 3.2 Distribución de la variable objetivo (Target)
 
-Se procede a analizar visualmente algunas variables numéricas clave para comprender su comportamiento y detectar posibles anomalías. Esta exploración también permite evaluar si se requieren transformaciones o normalizaciones en fases posteriores.
+Antes de aplicar cualquier modelo de clasificación, es importante entender cómo se distribuyen las clases en la variable objetivo. En este caso, `Target` indica si un motor ha fallado (`1`) o no (`0`). Analizar su distribución permite anticipar si será necesario aplicar técnicas de balanceo de clases.
 
-```{r distributions}
-# Convertir temperaturas a grados Celsius
-
-df$`Air temperature [C]` <- df$`Air temperature [K]` - 273.15
-
-df$`Process temperature [C]` <- df$`Process temperature [K]` - 273.15
-
-# Histograma de la variable objetivo
+```{r Target-distribution}
 ggplot(df, aes(x = factor(Target))) +
   geom_bar(fill = "steelblue") +
   labs(title = "Distribución de la variable objetivo (Target)", x = "Fallo", y = "Cantidad")
+```
 
-# Distribución de la temperatura del aire
-ggplot(df, aes(x = `Air temperature [C]`)) +
+El gráfico de barras muestra que aproximadamente el **70% de los motores no presentan fallos**, mientras que el **30% sí fallan**. Este **desbalance moderado** es relevante, ya que puede afectar el rendimiento de los modelos de clasificación, haciéndolos propensos a favorecer la clase mayoritaria.
+
+Por tanto, este análisis justifica el uso posterior de técnicas como el **sobremuestreo (upsampling)** para equilibrar la representación de clases durante el entrenamiento y mejorar la capacidad del modelo para detectar fallos.
+
+## 3.3 Distribución de variables numéricas relevantes
+
+En este apartado se analizan algunas de las variables numéricas más representativas del estado operativo del motor. El objetivo es comprender su distribución, identificar posibles valores atípicos y evaluar su comportamiento antes del modelado. Las variables seleccionadas han sido escogidas por su **relación directa con el rendimiento o desgaste del motor**, según la documentación del dataset.
+
+### Temperatura del aire (`Air temperature [K]`)
+
+La temperatura ambiente afecta directamente a la eficiencia térmica del motor. Se analiza su distribución para detectar sesgos o valores extremos que puedan requerir transformación o tratamiento adicional.
+
+En esta sección se representa la temperatura en su forma original, Kelvin, tal como aparece en el dataset bruto. Aunque esta unidad es válida físicamente, en la etapa de preprocesamiento (Sección 4) se convertirá a grados Celsius.
+
+```{r air-temperature}
+ggplot(df, aes(x = `Air temperature [K]`)) +
   geom_histogram(bins = 30, fill = "tomato", color = "black") +
-  labs(title = "Temperatura del aire (°C)", x = "°C", y = "Frecuencia")
+  labs(title = "Temperatura del aire (K)", x = "Kelvin", y = "Frecuencia")
+```
 
-# Distribución del torque
+La variable presenta una distribución **ligeramente sesgada**, pero **aproximadamente normal**, lo cual sugiere que puede utilizarse directamente en los modelos sin necesidad de transformación. No se observan valores atípicos evidentes.
+
+En el preprocesado posterior, esta variable será transformada a grados Celsius para facilitar su interpretación.
+
+### Torque (`Torque [Nm]`)
+
+El torque mide la fuerza de rotación aplicada, siendo un parámetro clave en condiciones de carga. Se visualiza para identificar su comportamiento general y evaluar su relación potencial con el fallo del motor.
+
+```{r torque}
 ggplot(df, aes(x = `Torque [Nm]`)) +
   geom_histogram(bins = 30, fill = "darkgreen", color = "black") +
   labs(title = "Distribución del Torque", x = "Nm", y = "Frecuencia")
+```
 
-# Boxplot de la velocidad rotacional por tipo de motor
+El torque presenta una **distribución ligeramente sesgada hacia la izquierda**, con un único pico principal alrededor de 40 Nm. No se observan modos secundarios que sugieran regímenes de operación diferenciados, pero la forma de la distribución podría estar relacionada con distintas cargas aplicadas durante el uso. Este comportamiento justifica su inclusión como predictor clave en el modelo.
+
+### Velocidad rotacional (`Rotational speed [rpm]`) por tipo de motor (`Type`)
+
+En lugar de graficar la distribución general, se ha optado por un **boxplot por tipo de motor**, ya que la variable `Type` segmenta los motores según su capacidad o configuración. Esto permite comparar directamente si existen diferencias operativas entre tipos.
+
+```{r rotational-speed}
 ggplot(df, aes(x = Type, y = `Rotational speed [rpm]`, fill = Type)) +
   geom_boxplot() +
   labs(title = "Velocidad rotacional por tipo de motor", x = "Tipo", y = "RPM")
 ```
 
-**Interpretación de las gráficas:**
+El gráfico de boxplot permite comparar la distribución de la velocidad rotacional (`RPM`) entre los distintos tipos de motor (`Type`). Aunque **las medianas y rangos centrales son bastante similares** para los tres grupos (`L`, `M`, `H`), se observa la presencia de **algunos valores atípicos**, especialmente en los tipos `H` y `M`.
 
-- El histograma de la variable `Target` confirma que existe un desbalance: el 70% de los registros corresponden a motores sin fallo. Este aspecto deberá tenerse en cuenta al construir el modelo.
+Estos valores extremos podrían reflejar **condiciones operativas poco frecuentes** o situaciones de carga elevada, lo que **refuerza la idea de que tanto** `Type` **como** `Rotational speed [rpm]` **podrían ser variables predictoras importantes** en la detección de fallos.
 
-- La distribución de la `Air temperature [C]` sigue un patrón normal con valores entre aproximadamente 21 °C y 32 °C. No se detectan valores atípicos significativos, lo que sugiere que esta variable está bien calibrada y no requiere transformación adicional.
+## 3.4 Correlaciones entre variables
 
-- El `Torque [Nm]` muestra una ligera asimetría hacia la derecha, con una mayoría de valores entre 20 y 60 Nm. Es una variable importante, ya que representa la carga aplicada al motor y podría tener influencia directa sobre la probabilidad de fallo.
+Antes de entrenar modelos de tipo lineal, como la regresión logística, es importante analizar las correlaciones entre variables numéricas. El objetivo es **detectar relaciones lineales fuertes que puedan generar multicolinealidad**, es decir, redundancia estadística entre predictores. Este fenómeno puede afectar tanto la interpretación del modelo como su estabilidad y rendimiento.
 
-- El boxplot de la `Rotational speed [rpm]` agrupado por `Type` revela que los motores de tipo `M` y `H` tienden a operar a velocidades más altas que los de tipo `L`. También se identifican algunos valores extremos que podrían representar condiciones de trabajo anómalas o señales tempranas de fallo.
-
-## 3.3 Correlaciones y multicolinealidad
-
-Antes de construir modelos predictivos, es importante examinar las correlaciones entre las variables numéricas. Esto permite identificar relaciones lineales, redundancias y posibles casos de multicolinealidad que podrían distorsionar el comportamiento de algunos algoritmos, como la regresión logística.
-
-A continuación, se presenta una matriz de correlación visualizada como un mapa de calor, seguido de una matriz de pares (`ggpairs`) para observar con mayor detalle la relación entre variables clave.
+En este análisis se incluyen únicamente variables numéricas relevantes desde el punto de vista operativo. Se han excluido variables duplicadas en diferentes unidades (como las temperaturas en Kelvin y Celsius) y campos identificadores como `UDI`.
 
 ```{r correlations}
-# Matriz de correlación entre variables numéricas
-numeric_vars <- select(df, where(is.numeric))
+library(corrplot)
+numeric_vars <- df %>%
+  select(`Rotational speed [rpm]`, `Torque [Nm]`, `Tool wear [min]`,
+         `Air temperature [K]`, Target)
+
 cor_matrix <- cor(numeric_vars)
-
-# Visualización como mapa de calor
-heatmap(cor_matrix, main = "Mapa de calor de correlaciones", col = topo.colors(10), symm = TRUE)
+corrplot(cor_matrix, method = "color", type = "upper",
+         col = colorRampPalette(c("blue", "white", "red"))(200),
+         tl.col = "black", addCoef.col = "black")
 ```
 
-Seguidamente, se seleccionan cinco variables numéricas clave para analizar visualmente sus relaciones mediante `ggpairs` del paquete GGally:
+El gráfico obtenido muestra que **no existe una correlación lineal fuerte entre las variables analizadas**. De hecho, la mayoría de coeficientes de correlación están muy próximos a cero, indicando independencia lineal.
 
-```{r ggpairs-correlation, warning=FALSE, message=FALSE}
-library(GGally)
-selected_vars <- df %>%
-  select(`Air temperature [C]`, `Process temperature [C]`, `Rotational speed [rpm]`, `Torque [Nm]`, `Tool wear [min]`)
+Algunas observaciones específicas:
 
-GGally::ggpairs(selected_vars)
-```
+- La mayor correlación observada es entre `Air temperature [C]` y `Torque [Nm]`, pero apenas alcanza un valor de **-0.06**, lo que no es estadísticamente significativo.
 
-### Interpretación:
+- Otras relaciones como entre `Torque` y `Tool wear`, o `Rotational speed` y `Target`, también muestran coeficientes **cercanos a cero**.
 
-El **mapa de calor** confirma que no existen correlaciones elevadas entre las variables predictoras del modelo. Las únicas relaciones fuertes son las esperables entre `Air temperature [K]` y `[C]`, y entre `Process temperature [K]` y `[C]`, ya que son conversiones entre sí. La columna `UDI`, como identificador secuencial, no aporta información predictiva útil, lo que justifica su eliminación posterior.
+- Esto indica que **no hay redundancia estadística evidente** entre los predictores, al menos desde el punto de vista de la correlación lineal.
 
-La matriz `ggpairs` permite observar visualmente estas relaciones. Las gráficas de dispersión muestran nubes de puntos muy dispersas, sin tendencias claras, lo que indica **correlaciones próximas a cero** y **baja redundancia entre variables**. Esto es positivo desde el punto de vista del modelado, ya que cada variable podría aportar información distinta al modelo sin causar problemas de multicolinealidad.
-
-En conjunto, estos resultados sugieren que el conjunto de variables es adecuado para entrenar modelos estadísticos o de aprendizaje automático sin necesidad de aplicar técnicas de reducción de dimensionalidad o eliminación por colinealidad.
-
-## 3.4 Balanceo de clases
-
-```{r class-balance}
-table(df$Target)
-prop.table(table(df$Target))
-```
-
-La variable objetivo `Target` presenta un desequilibrio moderado: aproximadamente el **70%** de los registros corresponden a motores que no han fallado (`Target = 0`), mientras que el **30%** restante presentan algún tipo de fallo (`Target = 1`).
-
-Aunque el desbalance no es extremo, puede influir negativamente en algunos algoritmos, ya que tienden a favorecer la clase mayoritaria. Este aspecto será tenido en cuenta en la fase de preparación de datos. Si fuera necesario, se aplicarán técnicas de **resampling** como *undersampling* o *SMOTE* para mejorar la capacidad del modelo de detectar correctamente los fallos.
+Este resultado sugiere que las variables pueden aportar información complementaria al modelo, lo que es positivo para la construcción de predictores independientes. La multicolinealidad será, no obstante, evaluada más adelante mediante el análisis de VIF tras el preprocesamiento.
 
 ---
 
 # 4. Preparación de los datos
 
-Antes de entrenar cualquier modelo, es necesario transformar y preparar adecuadamente los datos. En este caso, se han llevado a cabo las siguientes acciones:
+Antes de entrenar cualquier modelo de aprendizaje automático, es imprescindible preparar adecuadamente los datos. Esta fase tiene un impacto directo en el rendimiento y la interpretabilidad del modelo. En este caso, se han llevado a cabo las siguientes acciones:
 
-- **Conversión de unidades**: las temperaturas se han transformado de Kelvin a Celsius para facilitar la interpretación.
-- **Eliminación de columnas irrelevantes**: se eliminan campos como `UDI` (identificador secuencial) y `Product ID`, que no aportan valor predictivo directo.
-- **Tratamiento de variables categóricas**: inicialmente, la variable Type se codificó mediante one-hot encoding para utilizarla en modelos lineales. Sin embargo, esta estrategia puede introducir redundancias y problemas de multicolinealidad, especialmente cuando las categorías no tienen una relación ordinal. Tras revisar esta parte del preprocesado y considerando observaciones realizadas durante el proceso de evaluación, se ha optado por tratar Type como una variable de tipo factor, lo que permite al modelo interpretar su carácter categórico de forma más directa y eficiente.
-- **Balanceo de clases**: dado el desbalance moderado entre clases, se prepara una versión balanceada del conjunto de entrenamiento usando la técnica de sobremuestreo (*up-sampling*).
+- **Conversión de unidades**: Las temperaturas originalmente estaban expresadas en Kelvin. Aunque es una unidad válida desde el punto de vista físico, se decidió convertirlas a grados Celsius para facilitar su análisis e interpretación por parte de técnicos y responsables industriales.
+
+- **Eliminación de columnas irrelevantes**: Se eliminaron `UDI` y `Product ID` por ser identificadores sin información predictiva. También se eliminaron `Air temperature [K]` y `Process temperature [K]` tras calcular sus equivalentes en °C, evitando así redundancias que podrían interferir con el aprendizaje del modelo.
+
+- **Tratamiento de variables categóricas**: La variable `Type`, que indica el tipo de motor (H, M, L), fue inicialmente codificada como dummies (*one-hot encoding*). Sin embargo, tras una revisión metodológica, se decidió tratarla como un factor. Esto permite a ciertos algoritmos (*como la regresión logística en R*) manejarla de forma más eficiente y evita introducir colinealidad innecesaria entre columnas.
+
+- **Balanceo de clases**: Dado que solo el 30% de los motores presentan fallo (Target = 1), se aplicó sobremuestreo para igualar ambas clases en el conjunto de entrenamiento. Esta estrategia mejora la sensibilidad del modelo hacia la clase minoritaria y reduce el riesgo de un sesgo hacia la clase mayoritaria.
+
+- **Verificación de multicolinealidad**: Como paso final del preprocesado, se ha evaluado la independencia estadística entre predictores mediante el análisis del **Factor de Inflación de Varianza** (VIF). Esto es especialmente relevante antes de entrenar modelos lineales como la regresión logística
 
 El preprocesado de datos incluye una etapa crítica cuando se trabaja con conjuntos desbalanceados: el *up-sampling*. Esta técnica consiste en aumentar artificialmente el número de muestras de la clase minoritaria (en nuestro caso, los motores con fallo), duplicando aleatoriamente ejemplos de esa clase hasta igualar el número de la clase mayoritaria.
 
@@ -269,35 +255,81 @@ El objetivo del *up-sampling* es evitar que el modelo aprenda a ignorar la clase
 
 En este proyecto, se ha utilizado la función `upSample()` del paquete `caret` para igualar el número de casos con y sin fallo antes de entrenar el modelo.
 
-```{r data-preparation, warning=FALSE, message=FALSE}
-# 1. Eliminar columnas innecesarias
-df_clean <- df %>%
-  select(-UDI, -`Product ID`, -`Air temperature [K]`, -`Process temperature [K]`)
+## 4.1 Conversión de unidades
 
-# 2. Codificar la variable categórica 'Type' como factor (en lugar de one-hot encoding)
-df_clean$Type <- as.factor(df_clean$Type)
+Como parte del preprocesamiento, se convierte la variable Air temperature [K] a grados Celsius (Air temperature [C]) para facilitar su interpretación. La versión en Kelvin será eliminada en el siguiente paso para evitar redundancias.
 
-# 3. Verificar estructura final
-str(df_clean)
+```{r convert-units}
+df$`Air temperature [C]` <- df$`Air temperature [K]` - 273.15
 
-# 4. Dividir en clases para balanceo
-table(df_clean$Target)
+ggplot(df, aes(x = `Air temperature [C]`)) +
+  geom_histogram(bins = 30, fill = "tomato", color = "black") +
+  labs(title = "Distribución de la temperatura del aire (°C)",
+       x = "°C", y = "Frecuencia")
+```
 
-# 5. Crear versión balanceada del dataset (up-sampling)
+Esta nueva visualización confirma que, tras la conversión, la **distribución de la temperatura en grados Celsius mantiene su forma aproximadamente normal**, sin presencia de valores extremos. Esta transformación no altera el comportamiento estadístico de la variable, pero **sí mejora su interpretabilidad**.
+
+## 4.2 Eliminación de variables redundantes
+
+```{r remove-redundant}
+df <- df %>% select(-UDI, -`Product ID`, -`Air temperature [K]`, -`Process temperature [K]`)
+
+head(df)
+```
+
+`UDI` y `Product ID`: identificadores únicos, sin correlación con la variable objetivo ni uso práctico para predicción.
+
+`Air temperature [K]` y `Process temperature [K]`: sus equivalentes en °C ya fueron generados previamente para facilitar análisis más intuitivos, por lo que mantener ambas versiones genera redundancia y puede afectar a los modelos.
+
+Tras este paso, el conjunto de datos ya no incluye columnas irrelevantes como `UDI`, `Product ID`, ni versiones duplicadas de temperatura en Kelvin. Esto puede verificarse observando el contenido actual del dataset (`head(df)`), donde solo permanecen las variables con valor predictivo real y sin redundancias.
+
+## 4.3 Conversión de variables categóricas
+
+```{r convert-categorical}
+df$Type <- as.factor(df$Type)
+df$Target <- as.factor(df$Target)
+
+head(df)
+```
+
+Aunque `Target` ya contiene valores 0 y 1, se convierte en factor para asegurar que se trata como una variable categórica en los modelos de clasificación. Esto también evita que ciertas funciones interpreten erróneamente la variable como continua. La conversión de `Type` permite que modelos como `glm()` o árboles de decisión puedan interpretar directamente la categoría sin codificación adicional.
+
+Como resultado de esta transformación, las variables `Type` y `Target` ahora aparecen como factores (`<fctr>`), lo que indica que han pasado a tratarse correctamente como categorías en el análisis. Esto puede verse en la cabecera del dataset, donde antes `Type` era una cadena de caracteres (`<chr>`) y ahora se interpreta como factor, permitiendo un tratamiento adecuado en modelos de clasificación.
+
+## 4.4 Balanceo de clases
+
+Dado el desbalance observado en la variable Target, se procede a aplicar **upsampling** para equilibrar el conjunto de entrenamiento. A continuación se muestra la distribución original de clases:
+
+```{r unbalanced-classes}
+table(df$Target)
+```
+
+Se observa que la clase 0 (sin fallo) tiene más del doble de ejemplos que la clase 1 (fallo), lo que podría sesgar el modelo hacia la clase mayoritaria.
+
+La técnica de upsampling se aplicó usando `caret::upSample()`, que genera copias aleatorias de ejemplos de la clase minoritaria hasta igualar su número con la clase mayoritaria. Esto es fundamental en problemas donde el costo de un falso negativo (no detectar un fallo) es mucho mayor que el de un falso positivo. 
+
+Aunque aumenta el riesgo de *overfitting*, en este caso está justificado debido al desequilibrio moderado y al uso de modelos base.
+
+```{r balance-classes}
 library(caret)
-df_balanced <- upSample(x = df_clean %>% select(-Target),
-                        y = as.factor(df_clean$Target),
+
+set.seed(123)
+df_balanced <- upSample(x = df[, -which(names(df) == "Target")],
+                        y = df$Target,
                         yname = "Target")
 
 # Comprobar nuevo balance
 table(df_balanced$Target)
 ```
 
-## 4.1 Verificación de multicolinealidad tras el preprocesado
+La nueva tabla muestra que ambas clases (`0` y `1`) tienen ahora la misma cantidad de ejemplos (700 cada una), lo cual permite entrenar modelos más balanceados y sensibles a los fallos reales.
+
+## 4.5 Verificación de multicolinealidad tras el preprocesado
 
 Una vez creado el conjunto balanceado de datos (`df_balanced`), se ha procedido a comprobar la **multicolinealidad entre predictores** mediante el cálculo del **Variance Inflation Factor (VIF)**. Este análisis es clave antes de entrenar modelos lineales, ya que la presencia de colinealidad puede afectar negativamente tanto al ajuste como a la interpretación de los coeficientes del modelo.
 
-El análisis se ha realizado utilizando el conjunto balanceado completo, justo antes de dividir en entrenamiento y test. En el caso de variables categóricas como `Type` y `Failure Type`, el modelo calcula el **Generalized VIF (GVIF)**, que se ajusta en función del número de niveles del factor. Para interpretar correctamente estos valores, se utiliza la transformación estándar `GVIF^(1/(2*Df))`.
+El análisis se ha realizado utilizando el conjunto balanceado completo, justo antes de dividir en entrenamiento y test. En el caso de variables categóricas como `Type` y `Failure Type`, el modelo calcula el **Generalized VIF (GVIF)**, que se ajusta en función del número de niveles del factor. Para interpretar correctamente estos valores, se utiliza la transformación estándar `GVIF^(1/(2*Df))`, que permite comparar todos los predictores en la misma escala.
 
 
 ```{r vif-after-preprocessing}
@@ -309,17 +341,16 @@ print(vif_values)
 
 Resumen de los valores ajustados de VIF (GVIF^(1/(2*Df))):
 
-- **Type**: 1.009
-- **Rotational speed [rpm]**: 1.011
-- **Torque [Nm]**: 1.009
-- **Tool wear [min]**: 1.008
-- **Failure Type**: 1.007
-- **Air temperature [C]**: 1.009
-- **Process temperature [C]**: 1.011
+- **Type**: 1.0107
+- **Rotational speed [rpm]**: 1.0144
+- **Torque [Nm]**: 1.0129
+- **Tool wear [min]**: 1.0083
+- **Failure Type**: 1.0084
+- **Air temperature [C]**: 1.0132
 
-Todos los valores se sitúan muy cerca de 1, lo cual indica una muy baja colinealidad entre predictores. De hecho, ninguno de ellos supera el umbral habitual de 5 que indicaría problemas moderados, ni mucho menos el valor 10 que señalaría multicolinealidad severa.
+Todos los valores están muy próximos a 1, lo que indica una colinealidad prácticamente inexistente entre los predictores del modelo. Esto es especialmente positivo, ya que refuerza la independencia de las variables seleccionadas y evita distorsiones en la estimación de los coeficientes.
 
-Este resultado permite confirmar que las variables seleccionadas en el conjunto balanceado son suficientemente independientes entre sí desde el punto de vista estadístico. Por tanto, no se considera necesario eliminar ni transformar ninguna de ellas en esta etapa. El modelo de regresión logística podrá entrenarse con confianza en que sus predictores no presentan redundancia significativa.
+Ninguno de los predictores supera el umbral habitual de 5 (considerado como colinealidad moderada), ni mucho menos el valor de 10 (colinealidad severa). Por tanto, no es necesario eliminar ni transformar ninguna variable adicional en esta etapa.
 
 ---
 
@@ -327,16 +358,32 @@ Este resultado permite confirmar que las variables seleccionadas en el conjunto 
 
 ## 5.1 Algoritmo(s) utilizados
 
-Para esta primera aproximación, se ha optado por utilizar un modelo de **regresión logística**. Esta técnica es adecuada para problemas de clasificación binaria y permite interpretar la influencia de cada variable sobre la probabilidad de que ocurra un fallo. Aunque es un modelo lineal, ofrece un buen punto de partida para establecer una línea base de rendimiento.
+Para esta primera aproximación, se ha optado por utilizar un modelo de **regresión logística**, una técnica clásica pero potente para problemas de **clasificación binaria**. Su funcionamiento se basa en estimar la probabilidad de pertenencia a una clase en función de una combinación lineal de las variables predictoras, transformada mediante una función logística (sigmoide).
+
+Este modelo es especialmente útil por varias razones:
+
+- **Interpretabilidad**: permite identificar fácilmente qué variables tienen mayor peso en la predicción del fallo, lo cual es valioso en contextos industriales donde se requiere justificar las decisiones.
+
+- **Velocidad y simplicidad**: es rápido de entrenar y no requiere grandes cantidades de datos ni un ajuste excesivo de hiperparámetros.
+
+- **Robustez**: cuando los predictores están correctamente preparados y no presentan multicolinealidad, como es el caso tras el análisis con VIF, el modelo suele ofrecer buenos resultados iniciales.
+
+Aunque la regresión logística es un modelo lineal, ofrece una línea base de rendimiento razonable con la que se pueden comparar otros algoritmos más complejos. En secciones posteriores se evaluará también el comportamiento de un modelo Naïve Bayes, con el objetivo de explorar posibles diferencias en rendimiento y sensibilidad frente al tamaño de muestra.
 
 ## 5.2 División train/test
 
-Se ha dividido el conjunto balanceado en dos subconjuntos: un 80% para entrenamiento y un 20% para test. Esta división permite evaluar el rendimiento del modelo sobre datos no vistos durante el entrenamiento.
+Con el objetivo de evaluar la capacidad de generalización del modelo, se ha dividido el conjunto de datos balanceado (`df_balanced`) en dos subconjuntos:
+
+**80% para entrenamiento**, donde el modelo aprende los patrones a partir de los datos.
+
+**20% para test**, que se reserva para una evaluación objetiva del rendimiento sobre datos no vistos durante el entrenamiento.
+
+Esta división se realiza utilizando la función `createDataPartition()` del paquete `caret`, que además de dividir aleatoriamente, estratifica automáticamente la variable objetivo (`Target`). Esto asegura que ambas clases (fallo/no fallo) se mantengan en proporciones similares tanto en el conjunto de entrenamiento como en el de test, lo cual es especialmente relevante en problemas de clasificación binaria.
 
 ```{r split-data}
 # Cargar librerías necesarias
 library(caret)
-library(e1071)  # Necesaria para modelos con caret
+library(e1071)
 set.seed(123)
 
 # División en entrenamiento y test
@@ -345,18 +392,36 @@ trainData <- df_balanced[trainIndex, ]
 testData  <- df_balanced[-trainIndex, ]
 ```
 
+Esta separación permite una evaluación más fiable del rendimiento del modelo, minimizando el riesgo de sobreajuste (overfitting) al asegurar que las predicciones se validan con observaciones independientes del proceso de entrenamiento.
+
 ## 5.3 Entrenamiento del modelo
 
-Se ha entrenado el modelo de regresión logística utilizando el conjunto de entrenamiento previamente definido. El modelo se ajusta a los datos para estimar la probabilidad de fallo en función de las variables sensoriales.
+El modelo de **regresión logística** se ha entrenado utilizando el conjunto de entrenamiento definido en el paso anterior. Esta técnica permite modelar la probabilidad de que un motor falle (`Target = 1`) en función de las variables sensoriales disponibles, como torque, velocidad de rotación o temperatura.
+
+El entrenamiento se ha llevado a cabo con la función `train()` del paquete `caret`, que proporciona una interfaz uniforme para entrenar modelos y realizar validación cruzada de forma automatizada. En este caso, se ha especificado el método `"glm"` (generalized linear model) con familia `"binomial"` para resolver un problema de clasificación binaria.
 
 ```{r model-training}
 # Entrenamiento con regresión logística
 model_log <- train(Target ~ ., data = trainData, method = "glm", family = "binomial")
 ```
 
+Este proceso ajusta los coeficientes del modelo para minimizar la devianza residual, una medida que indica la discrepancia entre los valores observados y los predichos por el modelo. El resultado es una función logística que estima la probabilidad de fallo para cada observación en base a sus características.
+
 ## 5.4 Evaluación del modelo
 
-El modelo ha sido evaluado con el conjunto de test, y su rendimiento se ha analizado mediante una matriz de confusión. Esta permite calcular métricas como la exactitud (accuracy), sensibilidad (recall), precisión (precision) y F1-score, que son fundamentales para evaluar la capacidad del modelo de detectar correctamente los fallos.
+Una vez entrenado el modelo de regresión logística, se ha evaluado su rendimiento utilizando el conjunto de test. Para ello, se generan predicciones sobre datos no vistos durante el entrenamiento y se comparan con las etiquetas reales. El análisis se realiza mediante una matriz de confusión, a partir de la cual se calculan métricas fundamentales en clasificación binaria:
+
+- **Accuracy**: proporción de predicciones correctas sobre el total.
+
+- **Sensitivity (Recall)**: capacidad del modelo para detectar correctamente los casos positivos (fallos).
+
+- **Specificity**: capacidad de identificar correctamente los casos negativos (sin fallo).
+
+- **Precision**: proporción de verdaderos positivos entre los predichos como positivos.
+
+- **F1-score**: media armónica entre precisión y recall, útil especialmente con clases desbalanceadas.
+
+- **Kappa**: coeficiente que mide la concordancia entre predicción y realidad, ajustado por azar.
 
 ```{r model-evaluation}
 # Predicción
@@ -372,16 +437,27 @@ En este caso, el modelo alcanzó un rendimiento **perfecto** sobre el conjunto d
 - **Sensitivity (Recall)**: 1.0
 - **Specificity**: 1.0
 - **Pos Pred Value (Precision)**: 1.0
+- **Negative Predictive Value**: 1.00
 - **Balanced Accuracy**: 1.0
 - **Kappa**: 1.0
+- **No Information Rate (NIR)**: 0.5
+- **P-Value [Acc > NIR]**: < 2.2e-16 (indica que el modelo es significativamente mejor que una predicción aleatoria)
 
-Como tanto la precisión como el recall son 1.0, el **F1-score también es 1.0**. La matriz de confusión muestra 140 predicciones correctas para cada clase, sin errores. Aunque este resultado es excelente, también podría deberse a cierta simplicidad en los datos o al efecto del balanceo. En futuras versiones se podrá validar con *cross-validation* o conjuntos externos.
+La matriz de confusión muestra 140 predicciones correctas para cada clase y ningún error de clasificación.
+
+Aunque este rendimiento puede parecer ideal, debe interpretarse con precaución:
+
+- El conjunto fue balanceado artificialmente mediante upsampling, lo que facilita el aprendizaje del modelo.
+
+- Los datos de test provienen del mismo origen que los de entrenamiento, lo que reduce la heterogeneidad.
+
+- La validación cruzada y la evaluación sobre un conjunto no balanceado serían pasos importantes para confirmar la robustez del modelo.
 
 ## 5.5 Evaluación del riesgo de overfitting
 
-Aunque el modelo de regresión logística alcanza una precisión perfecta del 100% sobre el conjunto de test, este resultado debe ser interpretado con cautela. En contextos reales, una predicción sin errores es poco frecuente y puede ser indicativa de **sobreajuste** (*overfitting*), especialmente cuando se ha utilizado *up-sampling*, que consiste en duplicar instancias de la clase minoritaria para equilibrar el dataset.
+Aunque el modelo de regresión logística alcanza una precisión perfecta del 100% tanto en el conjunto de test como en la matriz de confusión, este resultado debe interpretarse con cautela. En contextos reales, una predicción sin errores es extremadamente poco común y puede ser indicativa de **sobreajuste** (*overfitting*), especialmente cuando se ha utilizado *up-sampling*, que consiste en duplicar instancias de la clase minoritaria para equilibrar el dataset.
 
-Para verificar si el modelo está sobreajustado o si realmente generaliza bien, se ha llevado a cabo una **validación cruzada de 10 particiones (10-fold cross-validation)**. Esta técnica entrena el modelo en diferentes subconjuntos del dataset (`df_balanced`) y valida su rendimiento en particiones independientes, proporcionando una evaluación más robusta que una sola división *train/test*.
+Para evaluar si el modelo realmente generaliza bien o si está memorizando patrones específicos, se ha aplicado una técnica robusta: la **validación cruzada de 10 particiones (10-fold cross-validation)**. Esta estrategia divide el dataset balanceado (`df_balanced`) en 10 subconjuntos (folds), y entrena y valida el modelo en diferentes combinaciones de estos, minimizando el riesgo de obtener resultados sesgados debido a una división aleatoria favorable.
 
 ```{r overfitting-evaluation}
 library(caret)
@@ -401,46 +477,68 @@ Los resultados muestran un **Accuracy (media)**: 1.00 y un valor **Kappa**: 1.00
 
 Estos valores confirman que el modelo mantiene un rendimiento perfecto incluso bajo validación cruzada, lo cual refuerza su consistencia. No obstante, este comportamiento podría deberse a ciertas características del dataset, como una **alta separabilidad entre clases**, un **diseño experimental simulado** o la **limpieza extrema de los datos**.
 
-Aunque los resultados sugieren que el modelo actual generaliza muy bien en este contexto, no puede descartarse completamente la posibilidad de sobreajuste, dado que el balanceo mediante duplicación puede facilitar que el modelo memorice patrones específicos.
+Aunque los resultados sugieren que el modelo generaliza correctamente en este entorno, no puede descartarse completamente la posibilidad de sobreajuste, ya que el balanceo mediante duplicación podría facilitar que el modelo memorice ejemplos en lugar de aprender patrones generalizables.
 
 Para validar su robustez en escenarios más realistas, se recomienda en futuras iteraciones evaluar el modelo sobre un conjunto externo real no balanceado, comparar con otros algoritmos más complejos (Random Forest, XGBoost) y/o analizar la estabilidad del modelo ante ruido o registros incompletos.
 
-Este enfoque permitirá comprobar su aplicabilidad en entornos industriales reales, donde los datos no siempre cumplen condiciones ideales.
+Este enfoque permitirá comprobar su aplicabilidad en entornos industriales reales, donde los datos no siempre cumplen condiciones ideales. Aun así, los resultados actuales constituyen una excelente base inicial para validar la viabilidad de modelos predictivos en mantenimiento industrial.
 
 ## 5.6 Análisis de residuos: homocedasticidad y linealidad
 
-Este paso es fundamental para comprobar si se cumplen dos supuestos clave de los modelos lineales (como la regresión logística):
+En modelos lineales clásicos, como la regresión lineal, es habitual analizar los residuos frente a los valores ajustados para comprobar si se cumplen ciertos supuestos fundamentales del modelo. Entre ellos, destacan dos:
 
-- **Linealidad** aproximada entre predictores y el logit de la variable objetivo.  
-- **Homocedasticidad**, es decir, que los residuos tengan una varianza constante y estén distribuidos aleatoriamente.
+- **Linealidad**: se refiere a que la relación entre las variables predictoras y la variable dependiente debe ser aproximadamente lineal. En otras palabras, el efecto de cada predictor sobre la variable objetivo debe poder representarse con una línea recta.
 
-Aunque la regresión logística no exige estrictamente homocedasticidad como en la regresión lineal, analizar los residuos permite identificar posibles problemas como outliers, colinealidad oculta o errores de especificación en el modelo.
+- **Homocedasticidad**: significa que la **varianza de los errores (residuos)** debe ser constante a lo largo de todos los niveles de las variables independientes. Si la varianza de los errores cambia (por ejemplo, crece o disminuye con el valor ajustado), se habla de **heterocedasticidad**, lo que puede afectar la validez de las inferencias estadísticas en un modelo lineal.
 
-Para ello, se ha representado el gráfico de **residuos deviance frente a los valores ajustados** del modelo:
+Sin embargo, en el caso de la **regresión logística**, estos supuestos **no se aplican de forma directa**:
 
-```{r residual-analysis}
-# Calcular residuos y valores ajustados
-model_res <- glm(Target ~ ., data = trainData, family = binomial())
-res <- residuals(model_res, type = "deviance")
-fitted_vals <- fitted(model_res)
+- El modelo estima probabilidades, no valores continuos, por lo que la relación esperada no es lineal entre predictores y la variable dependiente, sino entre los predictores y el **logit** (logaritmo del cociente de probabilidades).
 
-# Gráfico de residuos vs valores ajustados
-plot(fitted_vals, res,
-     xlab = "Valores ajustados",
-     ylab = "Residuos deviance",
-     main = "Residuos vs Valores ajustados")
-abline(h = 0, col = "red")
+- Los residuos deviance no siguen una distribución continua ni presentan varianza constante, por lo que el supuesto de homocedasticidad **no tiene sentido en este contexto**.
+
+Por estos motivos, se ha decidido no representar el gráfico de residuos frente a valores ajustados, ya que su uso, aunque frecuente en regresión lineal, no es válido ni informativo para evaluar una regresión logística.
+
+Este apartado se mantiene como reflexión crítica, ya que en entregas anteriores se sugirió realizar este tipo de análisis. A partir de la revisión bibliográfica y metodológica, se ha optado por omitirlo conscientemente, sustituyéndolo por herramientas más adecuadas para modelos de clasificación: **validación cruzada**, **métricas de rendimiento** y **análisis de colinealidad**.
+
+## 5.7 Evaluación alternativa con Naïve Bayes
+
+Con el objetivo de comparar la regresión logística con otro enfoque clásico de clasificación, se ha evaluado también un modelo basado en **Naïve Bayes**. Este algoritmo se basa en el **teorema de Bayes** con una fuerte suposición de **independencia condicional entre los predictores**, lo cual rara vez se cumple en la práctica. Aun así, Naïve Bayes suele ofrecer buenos resultados en muchos problemas reales debido a su simplicidad y eficiencia.
+
+Además, Naïve Bayes es un modelo **rápido, simple y eficaz con pocos datos**, lo que lo convierte en una opción interesante en escenarios industriales con recursos computacionales limitados o necesidad de respuesta en tiempo real.
+
+En este experimento, se comparó su rendimiento frente al modelo de regresión logística utilizando el mismo conjunto de datos balanceado y una validación cruzada de 10 particiones (*10-fold cross-validation*), para garantizar una evaluación justa y coherente.
+
+### Entrenamiento del modelo
+
+```{r naive-bayes}
+# Definir control de validación cruzada
+train_control <- trainControl(method = "cv", number = 10)
+
+# Entrenar modelo Naïve Bayes
+model_nb <- train(Target ~ ., data = df_balanced,
+                  method = "naive_bayes",
+                  trControl = train_control)
+print(model_nb)
 ```
 
-El gráfico muestra únicamente dos puntos extremos con residuos prácticamente nulos. Esto confirma que el modelo ha clasificado las observaciones sin error alguno, y que los residuos deviance están casi exactamente en cero.
+Durante el proceso, se evaluaron dos variantes del modelo: con y sin estimación kernel de las distribuciones. Los valores finales seleccionados automáticamente fueron:
 
-Aunque el análisis gráfico no revela problemas de linealidad ni homocedasticidad, el resultado es inusualmente ideal. Por ello, es recomendable evaluar el modelo sobre un conjunto con ruido o datos reales no balanceados, complementar este análisis con residuos estandarizados e influencia de observaciones (p.ej., leverage o Cook’s distance) y considerar modelos alternativos o ensambles para comprobar la robustez de los resultados.
+- `usekernel = TRUE`
 
-A pesar de su perfección técnica, el gráfico de residuos debe interpretarse en el contexto de todo el análisis previo, especialmente junto al rendimiento perfecto observado en test y en validación cruzada.
+- `laplace` = 0
+
+- `adjust` = 1
+
+El modelo **sin kernel** obtuvo un rendimiento bajo (67.5% de aciertos), lo que sugiere que **la suposición de independencia condicional y distribución normal de los predictores no se cumple** en este conjunto de datos.
+
+Por el contrario, al activar la opción `usekernel = TRUE`, que permite estimar las distribuciones de forma no paramétrica, el rendimiento mejoró drásticamente, alcanzando una precisión del **99.93%** y un índice Kappa de **0.9986**, muy cercano al rendimiento perfecto de la regresión logística.
+
+Este experimento demuestra que con una mínima adaptación (uso de kernel), **Naïve Bayes puede ser altamente competitivo**, incluso sin necesidad de estructuras complejas ni ajustes exhaustivos. A pesar de su simplicidad, el modelo logra un rendimiento excelente gracias a la calidad del preprocesado y la separabilidad de las clases en el dataset.
 
 ---
 
-## 6. Conclusiones
+# 6. Conclusiones
 
 ### Primera Entrega Intermedia:
 
@@ -487,6 +585,18 @@ Por tanto, aunque los resultados son técnicamente sólidos y estadísticamente 
 - Incorporar métricas complementarias como curvas ROC, AUC o precisión-recall.
 
 En conjunto, se concluye que el modelo actual proporciona una **base muy sólida** para la predicción de fallos en entornos industriales simulados, y sienta las bases para su validación y refinamiento en escenarios más realistas y exigentes.
+
+### Tercera Entrega Intermedia:
+
+En esta tercera y última entrega intermedia, se ha reforzado el carácter explicativo del trabajo con el objetivo de guiar al lector a lo largo del análisis, justificando cada decisión tomada. A raíz de los comentarios del profesor, se ha rediseñado completamente el apartado de análisis exploratorio (EDA), especificando qué variables se visualizan, por qué se seleccionan y qué se espera obtener con cada gráfico.
+
+También se ha mejorado la narrativa de las fases de preprocesado, explicando detalladamente la conversión de variables categóricas, la eliminación de redundancias y el uso de técnicas de balanceo como el up-sampling. En particular, se ha aclarado el motivo por el que Target, a pesar de ser binaria, se convierte a factor: esto permite al motor de entrenamiento de caret tratarla correctamente como variable categórica durante la clasificación.
+
+Uno de los puntos clave en esta revisión ha sido el análisis de residuos. En entregas anteriores, se había incluido un gráfico de residuos vs valores ajustados, siguiendo una lógica propia de modelos lineales. En esta versión, se ha decidido no generar dicho gráfico, explicando por qué no es aplicable en regresión logística y reconociendo explícitamente que su inclusión previa fue un error metodológico.
+
+Por recomendación directa del profesor, también se ha incluido un experimento complementario con Naïve Bayes, comparando su rendimiento frente a la regresión logística. Los resultados han mostrado que, si bien la versión clásica del modelo (sin kernel) ofrece un rendimiento limitado, la variante con usekernel = TRUE alcanza una precisión del 99.93%, lo que valida la robustez de los datos y el preprocesado.
+
+Si bien los resultados siguen siendo técnicamente impecables, se mantiene una postura prudente ante la posibilidad de sobreajuste. Como siguiente paso, se propone validar los modelos en condiciones más realistas y extender el análisis hacia tareas más complejas, como la predicción del tipo de fallo (Failure Type).
 
 ---
 
