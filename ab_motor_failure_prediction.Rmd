@@ -597,7 +597,7 @@ Uno de los puntos clave en esta revisión ha sido el análisis de residuos. En e
 Por recomendación directa del profesor, también se ha incluido un experimento complementario con Naïve Bayes, comparando su rendimiento frente a la regresión logística. Los resultados han mostrado que, si bien la versión clásica del modelo (sin kernel) ofrece un rendimiento limitado, la variante con usekernel = TRUE alcanza una precisión del 99.93%, lo que valida la robustez de los datos y el preprocesado.
 
 Si bien los resultados siguen siendo técnicamente impecables, se mantiene una postura prudente ante la posibilidad de sobreajuste. Como siguiente paso, se propone validar los modelos en condiciones más realistas y extender el análisis hacia tareas más complejas, como la predicción del tipo de fallo (Failure Type).
-
+ 
 ---
 
 # Bibliografía
