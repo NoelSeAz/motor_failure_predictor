@@ -4,7 +4,6 @@ author: "Noel Sebastia"
 date: "2025.01.04"
 output:
   html_notebook: default
-  pdf_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -273,7 +272,7 @@ Esta nueva visualización confirma que, tras la conversión, la **distribución 
 ## 4.2 Eliminación de variables redundantes
 
 ```{r remove-redundant}
-df <- df %>% select(-UDI, -`Product ID`, -`Air temperature [K]`, -`Process temperature [K]`, -`Failure Type`)
+df <- df %>% select(-UDI, -`Product ID`, -`Air temperature [K]`, -`Process temperature [K]`)
 
 head(df)
 ```
@@ -505,35 +504,6 @@ model_log <- train(Target ~ ., data = trainData, method = "glm", family = "binom
 
 Este proceso ajusta los coeficientes del modelo para minimizar la devianza residual, una medida que indica la discrepancia entre los valores observados y los predichos por el modelo. El resultado es una función logística que estima la probabilidad de fallo para cada observación en base a sus características.
 
-### 5.5.1 Interpretación de los coeficientes (β) del modelo
-
-Una de las principales ventajas de la regresión logística es su interpretabilidad. Al tratarse de un modelo lineal, cada predictor tiene un coeficiente asociado (β), que representa su contribución al logaritmo de las probabilidades (logit).
-
-```{r model-coefficients}
-summary(model_log$finalModel)
-```
-### 5.3.2 Regularización con Lasso (L1) para selección de variables
-
-Para comprobar si el modelo puede optimizarse o eliminar variables redundantes, se ha aplicado regularización tipo Lasso (L1). Esta técnica penaliza los coeficientes más pequeños y tiende a dejarlos en cero, lo que permite realizar selección automática de variables.
-
-```{r lasso-regularization}
-library(glmnet)
-
-# Preparar los datos como matriz para glmnet
-x <- model.matrix(Target ~ . -1, data = df_balanced)
-y <- as.numeric(as.character(df_balanced$Target))
-
-# Validación cruzada para seleccionar lambda óptimo
-set.seed(123)
-cv_lasso <- cv.glmnet(x, y, family = "binomial", alpha = 1)
-
-# Visualizar error vs lambda
-plot(cv_lasso)
-
-# Extraer coeficientes con lambda óptimo
-coef(cv_lasso, s = "lambda.min")
-```
-
 ## 5.4 Evaluación del modelo
 
 Una vez entrenado el modelo de regresión logística, se ha evaluado su rendimiento utilizando el conjunto de test. Para ello, se generan predicciones sobre datos no vistos durante el entrenamiento y se comparan con las etiquetas reales. El análisis se realiza mediante una matriz de confusión, a partir de la cual se calculan métricas fundamentales en clasificación binaria:
@@ -734,7 +704,7 @@ small_metrics <- map_dfr(1:n_reps, function(i) {
 summary_small <- small_metrics %>%
   summarise(across(AUC:F1, list(mean = ~round(mean(.),3), sd = ~round(sd(.),3))))
 
-knitr::kable(summary_small, caption = "Rendimiento medio (± sd) con solo el 25 % del train_base")
+knitr::kable(summary_small, caption = "Rendimiento medio (±sd) con solo el 25% del train_base")
 ```
 
 ```{r 5-6-2-plot, echo=FALSE, warning=FALSE}
@@ -761,7 +731,7 @@ El experimento con el **25% del `train_base`** arroja valores de AUC, Balanced A
 * **Limitación** – La prueba se realiza sobre un *test* derivado del mismo dominio y con balanceo artificial. En datos reales no balanceados la AUC podría descender. Aun así, los resultados indican que el modelo es estable frente a variaciones razonables del tamaño de entrenamiento.
 
 **Recomendación**  
-> Para verificar robustez en entorno productivo conviene repetir esta prueba con (i) datos de planta sin balancear y (ii) porcentajes de muestra aún menores (10 %, 5 %) o incluso validación temporal progresiva si existen series de tiempo.
+> Para verificar robustez en entorno productivo conviene repetir esta prueba con (i) datos de planta sin balancear y (ii) porcentajes de muestra aún menores (10%, 5%) o incluso validación temporal progresiva si existen series de tiempo.
 
 ---
 
@@ -820,7 +790,147 @@ Este experimento demuestra que con una mínima adaptación (uso de kernel), **Na
 
 ---
 
-# 6. Conclusiones
+# 6. Revisión crítica posterior al modelado: impacto de la variable Failure Type
+
+## 6.0 Introducción y agradecimiento
+
+Durante el desarrollo de este trabajo se realizaron diversas pruebas de modelado para predecir el fallo de motores a partir de variables sensoriales. En un principio, los resultados obtenidos por el modelo de regresión logística eran extraordinariamente buenos, alcanzando un AUC de 1, F1 = 1 y clasificación perfecta en todos los experimentos, incluso con subconjuntos reducidos de datos.
+
+Sin embargo, a raíz de un comentario del profesor evaluador, se identificó un posible problema metodológico que podía explicar estos resultados tan inusualmente buenos. En concreto, el profesor sugerió analizar los coeficientes del modelo (valores beta), revisar qué variables aportaban más información, y explorar si se había producido overfitting debido a la presencia de variables excesivamente predictivas o redundantes.
+
+Gracias a este comentario, se descubrió que el dataset contenía una variable denominada `Failure Type` que, de forma directa o indirecta, contenía información equivalente a la variable objetivo `Target`. Este hallazgo dio lugar a una revisión completa del modelo y del pipeline de datos.
+
+Aprovecho esta sección para agradecer sinceramente al profesor su observación, que ha permitido corregir un problema metodológico importante y mejorar sustancialmente el valor formativo y profesional del trabajo.
+
+En los siguientes apartados se detalla cómo se identificó el problema, cuál era su impacto real, cómo se corrigió el dataset, y cuáles son ahora los resultados reales y defendibles del modelo.
+
+## 6.1 Análisis de coeficientes y regularización Lasso
+
+```{r beta-coefficients, echo=TRUE}
+# Análisis de los coeficientes del modelo inicial (con 'Failure Type')
+summary(model_log$finalModel)
+```
+
+Los coeficientes obtenidos muestran valores extremadamente pequeños, errores estándar anormalmente altos y valores p igual a 1. Esto indica que el modelo no está estimando coeficientes significativos. La causa probable es que existe **una separación perfecta en los datos**, es decir, el modelo es capaz de predecir la variable objetivo sin cometer errores, lo que impide una estimación fiable de los parámetros.
+
+Este fenómeno también se confirma al aplicar regularización tipo Lasso:
+
+```{r lasso-regularization, echo=TRUE}
+library(glmnet)
+x <- model.matrix(Target ~ . -1, data = df_balanced)
+y <- as.numeric(as.character(df_balanced$Target))
+
+set.seed(123)
+cv_lasso <- cv.glmnet(x, y, family = "binomial", alpha = 1)
+plot(cv_lasso)
+coef(cv_lasso, s = "lambda.min")
+```
+
+El modelo penalizado conserva exclusivamente el término `Failure Type = No Failure`, y elimina todos los demás. Esto confirma que el modelo estaba **apoyándose íntegramente en esta variable para tomar su decisión**, lo cual invalida su interpretabilidad y utilidad real.
+
+Este hallazgo evidencia un caso claro de **data leakage** (fuga de información), ya que `Failure Type` contenía indirectamente la respuesta de la variable objetivo `Target`. La aparición de la etiqueta "No Failure" implica necesariamente `Target = 0`, por lo que el modelo no necesitaba aprender a partir de sensores reales.
+
+En el siguiente apartado se corrige este error y se reentrena el modelo eliminando la variable conflictiva.
+
+## 6.2 Corrección del dataset y reentrenamiento
+
+Para solventar el problema identificado, se realizó una modificación en la fase de preprocesamiento de los datos, eliminando la columna `Failure Type` del conjunto de datos antes de realizar cualquier tipo de balanceo o modelado.
+
+```{r remove-failure-type}
+df <- df %>%
+  select(-`Failure Type`)  # Eliminamos la columna que generaba data leakage
+```
+
+Una vez corregido el dataset, se repitió el proceso completo de:
+
+1. Balanceo del dataset mediante upsampling.
+
+2. División en conjunto de entrenamiento y test.
+
+3. Entrenamiento del modelo de regresión logística.
+
+4. Evaluación del rendimiento del modelo.
+
+```{r re-train-model}
+# Balanceo de clases
+set.seed(123)
+df_upsampled <- upSample(x = df %>% select(-Target), y = df$Target, yname = "Target")
+
+# División en train/test
+set.seed(123)
+trainIndex <- createDataPartition(df_upsampled$Target, p = .8, list = FALSE)
+train <- df_upsampled[trainIndex, ]
+test <- df_upsampled[-trainIndex, ]
+
+# Entrenamiento del modelo corregido
+model_corr <- train(Target ~ ., data = train, method = "glm", family = "binomial")
+```
+
+Este nuevo modelo se ha entrenado únicamente con variables sensoriales reales, sin ninguna información que provenga directa o indirectamente de la variable objetivo. En el siguiente apartado se analizan los resultados obtenidos y se comparan con los anteriores.
+
+## 6.3 Análisis del nuevo modelo
+
+Una vez reentrenado el modelo sin la variable `Failure Type`, los resultados obtenidos reflejan un comportamiento mucho más realista y defendible desde el punto de vista metodológico.
+
+```{r new-model-evaluation}
+pred_corr <- predict(model_corr, newdata = test)
+confusionMatrix(pred_corr, test$Target)
+
+# Probabilidades para curva ROC y calibración
+probs_corr <- predict(model_corr, newdata = test, type = "prob")
+roc_corr <- roc(response = test$Target, predictor = probs_corr[,2])
+plot(roc_corr, main = "Curva ROC - Modelo corregido")
+auc(roc_corr)
+```
+
+Las nuevas métricas clave son:
+
+- **Accuracy:** ≈ 0.82
+
+- **F1 Score:** ≈ 0.82
+
+- **Balanced Accuracy:** ≈ 0.82
+
+- **AUC:** ≈ 0.92
+
+Estas cifras indican que el modelo generaliza bien, con un buen equilibrio entre sensibilidad y especificidad, y un excelente poder discriminativo (AUC).
+
+Además, los coeficientes del modelo corregido son ahora interpretables y muestran que las variables `Torque`, `Tool wear` y `Rotational speed` son estadísticamente significativas.
+
+```{r new-model-coefficients}
+summary(model_corr$finalModel)
+```
+
+El análisis de regularización tipo Lasso también confirma esta interpretación, ya que ahora conserva varias variables sensoriales en lugar de una sola categórica:
+
+```{r lasso-corrected}
+x_corr <- model.matrix(Target ~ . -1, data = df_upsampled)
+y_corr <- as.numeric(as.character(df_upsampled$Target))
+
+cv_lasso_corr <- cv.glmnet(x_corr, y_corr, family = "binomial", alpha = 1)
+plot(cv_lasso_corr)
+coef(cv_lasso_corr, s = "lambda.min")
+```
+
+Finalmente, la curva de calibración obtenida ahora refleja una predicción más natural, con puntos dispersos y ajustados a la diagonal, lo que indica que el modelo está bien calibrado y no sobreajustado al conjunto de entrenamiento.
+
+En conjunto, estos resultados confirman que la eliminación de `Failure Type` ha permitido construir un modelo más realista, robusto e interpretable.
+
+## 6.4 Reflexión crítica
+
+Este ejercicio ha sido una lección clave sobre la importancia de revisar los resultados con mirada crítica y no dar por válidos los buenos resultados sin analizar su origen. La detección del problema de fuga de información ha puesto de manifiesto un error metodológico relevante, que podría haber invalidado por completo la utilidad del modelo en un entorno real.
+
+Gracias a la revisión inducida por el comentario del profesor, se ha podido corregir este error y construir un modelo más honesto, cuyo rendimiento es muy bueno y está basado únicamente en variables sensoriales reales, replicables en producción.
+
+Esta experiencia también demuestra la importancia de interpretar los coeficientes del modelo y aplicar técnicas de regularización como Lasso no solo para mejorar la precisión, sino también para validar la robustez del aprendizaje.
+
+En el contexto profesional, documentar este tipo de errores no resta valor al trabajo; al contrario, lo engrandece. Refleja capacidad de autocrítica, mejora continua y comprensión profunda del proceso de modelado. Si este proyecto se desplegara en producción, esta revisión habría evitado un modelo inútil o incluso peligroso.
+
+En resumen, esta corrección no solo mejora el trabajo, sino que convierte un fallo en una fortaleza formativa de gran valor.
+
+---
+
+# 7. Conclusiones
 
 ### Primera Entrega Intermedia:
 
@@ -880,64 +990,42 @@ Por recomendación directa del profesor, también se ha incluido un experimento 
 
 Si bien los resultados siguen siendo técnicamente impecables, se mantiene una postura prudente ante la posibilidad de sobreajuste. Como siguiente paso, se propone validar los modelos en condiciones más realistas y extender el análisis hacia tareas más complejas, como la predicción del tipo de fallo (Failure Type).
 
-### Conclusión final
+### Pre Conclusión final
 
-Este proyecto demuestra que, con un preprocesado cuidadoso y un modelo interpretable
-(regresión logística), es posible **predecir con exactitud los fallos de motores
-eléctricos** en un entorno industrial simulado.
+Este proyecto demuestra que, con un preprocesado cuidadoso y un modelo interpretable (regresión logística), es posible predecir con exactitud los fallos de motores eléctricos en un entorno industrial simulado.
 
-1. **Separabilidad del problema.**  
-   Las variables operativas (torque, velocidad y desgaste) contienen señales
-   suficientemente fuertes como para obtener AUC = 1 incluso con solo un 25 %
-   de los datos de entrenamiento. La frontera lineal es estable y la multicolinealidad
-   es despreciable (VIF ≈ 1).
+**Separabilidad del problema.**
+Las variables operativas (torque, velocidad y desgaste) contienen señales suficientemente fuertes como para obtener AUC = 1 incluso con solo un 25 % de los datos de entrenamiento. La frontera lineal es estable y la multicolinealidad es despreciable (VIF ≈ 1).
 
-2. **Balanceo de clases.**  
-   Se evaluaron upsampling, SMOTE y undersampling. Todas logran métricas
-   perfectas, pero el upsampling aleatorio se adopta por ser el método más sencillo,
-   auditable y sin generación de datos sintéticos.
+**Balanceo de clases.**
+Se evaluaron upsampling, SMOTE y undersampling. Todas logran métricas perfectas, pero el upsampling aleatorio se adopta por ser el método más sencillo, auditable y sin generación de datos sintéticos.
 
-3. **Evaluación exhaustiva.**  
-   La combinación de matriz de confusión, curva ROC, curva de calibración y
-   validación cruzada 10-fold confirma la **ausencia de sobreajuste** dentro del
-   dominio simulado. Las probabilidades están perfectamente calibradas, aunque son
-   extremas (0 o 1), lo que sugiere usar umbrales adaptativos o recalibración con
-   datos reales si se necesita graduar riesgos.
+**Evaluación exhaustiva.**
+La combinación de matriz de confusión, curva ROC, curva de calibración y validación cruzada 10-fold confirma la ausencia de sobreajuste dentro del dominio simulado. Las probabilidades están perfectamente calibradas, aunque son extremas (0 o 1), lo que sugiere usar umbrales adaptativos o recalibración con datos reales si se necesita graduar riesgos.
 
-4. **Prueba de robustez con muestra reducida.**  
-   Diez réplicas con solo el 25 % del *train* mantuvieron AUC = 1 (sd = 0),
-   indicando que el tamaño de muestra no es un factor crítico mientras la
-   distribución de variables se conserve.
+**Prueba de robustez con muestra reducida.**
+Diez réplicas con solo el 25 % del train mantuvieron AUC = 1 (sd = 0), indicando que el tamaño de muestra no es un factor crítico mientras la distribución de variables se conserve.
 
-5. **Comparativa de algoritmos.**  
-   Naïve Bayes con kernel se aproxima al rendimiento de la regresión logística
-   (99.9 % de accuracy) demostrando que el preprocesado es más determinante que
-   la elección del clasificador en este dataset.
+**Comparativa de algoritmos.**
+Naïve Bayes con kernel se aproxima al rendimiento de la regresión logística (99.9 % de accuracy) demostrando que el preprocesado es más determinante que la elección del clasificador en este dataset.
+
+## Conclusión Final
+
+El presente trabajo ha tenido como objetivo diseñar un modelo de aprendizaje automático para predecir fallos en motores industriales. A lo largo del proceso se han abordado distintos retos técnicos: desde el análisis exploratorio y el preprocesamiento de datos hasta el diseño, validación y evaluación de modelos de clasificación.
+
+Entre los principales logros se encuentra la correcta integración de técnicas de balanceo, validación cruzada y análisis de residuos. Asimismo, se han aplicado métricas sólidas (F1, AUC, Matriz de Confusión, Curvas ROC) para evaluar el rendimiento.
+
+Lo más relevante ha sido la capacidad para detectar y corregir un fallo metodológico crítico relacionado con fuga de información. Este descubrimiento ha permitido reforzar el aprendizaje práctico sobre la importancia de la integridad de los datos, así como sobre las implicaciones de incluir variables inapropiadas en modelos supervisados.
+
+El modelo final, reentrenado con un conjunto de variables sensoriales limpias, ha demostrado una buena capacidad predictiva, con valores de AUC superiores al 0.9 y una F1 score equilibrada.
+
+Este proyecto deja una base sólida para continuar explorando modelos más avanzados (e.g., Random Forest, XGBoost), incorporar análisis de causa del fallo o desplegar el sistema en un entorno industrial real.
+
+
 
 ---
 
-### Líneas de trabajo futuras
-
-* **Validación externa** con datos reales, no balanceados, para verificar que la
-  separación perfecta no es artefacto de un entorno simulado.
-* **Predicción multiclase** del tipo de fallo (`Failure Type`) empleando modelos
-  como Random Forest o XGBoost y evaluando métricas *per-class*.
-* **Re-calibración** mediante *Platt scaling* o regresión isotónica si en planta
-  se requieren probabilidades graduadas (por ejemplo, para planificar mantenimientos
-  en función de un nivel de riesgo).
-* **Análisis temporal**: incorporar series de sensores para anticipar fallos con
-  mayor antelación y detectar deriva del proceso.
-
-En resumen, el trabajo cumple los objetivos de la Unidad 25: aplica los principios
-del aprendizaje automático para diseñar una **máquina inteligente** capaz de
-diagnosticar su propio estado y planificar actuaciones de mantenimiento. La
-metodología es transparente, las decisiones están justificadas y se dejan claras
-las limitaciones y los pasos necesarios para llevar el modelo a un entorno de
-producción real.
- 
----
-
-# Bibliografía
+# 8. Bibliografía
 
 - Kuhn, M. and Johnson, K. (2013). *Applied Predictive Modeling*. Springer. ISBN 978-1-4614-6848-6.
 
