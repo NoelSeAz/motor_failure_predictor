@@ -11,7 +11,7 @@ output:
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 ```
 
-# 1. Fundamentos del Aprendizaje Automático (LO1)
+# 1. Fundamentos del Aprendizaje Automático
 
 ## 1.1 ¿Qué es el aprendizaje automático?
 
@@ -273,7 +273,7 @@ Esta nueva visualización confirma que, tras la conversión, la **distribución 
 ## 4.2 Eliminación de variables redundantes
 
 ```{r remove-redundant}
-df <- df %>% select(-UDI, -`Product ID`, -`Air temperature [K]`, -`Process temperature [K]`)
+df <- df %>% select(-UDI, -`Product ID`, -`Air temperature [K]`, -`Process temperature [K]`, -`Failure Type`)
 
 head(df)
 ```
@@ -297,24 +297,31 @@ Aunque `Target` ya contiene valores 0 y 1, se convierte en factor para asegurar 
 
 Como resultado de esta transformación, las variables `Type` y `Target` ahora aparecen como factores (`<fctr>`), lo que indica que han pasado a tratarse correctamente como categorías en el análisis. Esto puede verse en la cabecera del dataset, donde antes `Type` era una cadena de caracteres (`<chr>`) y ahora se interpreta como factor, permitiendo un tratamiento adecuado en modelos de clasificación.
 
-## 4.4 Balanceo de clases
+### 4.4 Balanceo de clases
 
-Dado el desbalance observado en la variable Target, se procede a aplicar **upsampling** para equilibrar el conjunto de entrenamiento. A continuación se muestra la distribución original de clases:
+A partir del análisis EDA (Sección 3.2) observamos que la clase *Target = 1* representa sólo ≈30% de los registros. Para que el modelo aprenda a detectar fallos sin sesgo hacia la clase mayoritaria es necesario equilibrar las clases **dentro del conjunto de entrenamiento**.  
+A continuación se describen y comparan tres estrategias clásicas de balanceo.
 
-```{r unbalanced-classes}
-table(df$Target)
-```
+---
 
-Se observa que la clase 0 (sin fallo) tiene más del doble de ejemplos que la clase 1 (fallo), lo que podría sesgar el modelo hacia la clase mayoritaria.
+#### 4.4.1 Sobremuestreo aleatorio (Upsampling)
 
-La técnica de upsampling se aplicó usando `caret::upSample()`, que genera copias aleatorias de ejemplos de la clase minoritaria hasta igualar su número con la clase mayoritaria. Esto es fundamental en problemas donde el costo de un falso negativo (no detectar un fallo) es mucho mayor que el de un falso positivo. 
+**¿Qué es el sobremuestreo aleatorio y por qué lo utilizamos?**  
+El *upsampling* (sobremuestreo aleatorio) consiste en **duplicar aleatoriamente** registros de la clase minoritaria (*Target=1*) hasta igualar su tamaño al de la clase mayoritaria. De este modo, el algoritmo recibe un conjunto de entrenamiento balanceado y evita aprender un sesgo sistemático contra los fallos, mejorando la sensibilidad (*recall*).
 
-Aunque aumenta el riesgo de *overfitting*, en este caso está justificado debido al desequilibrio moderado y al uso de modelos base.
+*Principio clave*: no se generan datos sintéticos —cada fila que se replica proviene de un caso real—, lo que preserva la trazabilidad del dataset y facilita la justificación ante auditores industriales.
 
-```{r balance-classes}
+*Cuándo es útil*: cuando el coste de un falso negativo (no detectar un fallo) es mucho mayor que el de un falso positivo y disponemos de un número moderado de observaciones.
+
+*Limitación*: al repetir información, puede aumentar el riesgo de *overfitting* si el modelo memoriza los duplicados en lugar de aprender patrones generales.
+
+A continuación se aplica la función `upSample()` (paquete **caret**) para balancear el **data frame original** `df`, produciendo un nuevo objeto `df_balanced` que se usará en los experimentos posteriores:
+
+
+```{r 4-4-1-upsampling, echo=TRUE}
 library(caret)
-
 set.seed(123)
+#duplica aleatoriamente registros de la clase minoritaria (Target=1)
 df_balanced <- upSample(x = df[, -which(names(df) == "Target")],
                         y = df$Target,
                         yname = "Target")
@@ -322,8 +329,99 @@ df_balanced <- upSample(x = df[, -which(names(df) == "Target")],
 # Comprobar nuevo balance
 table(df_balanced$Target)
 ```
+Como se puede observar, el nuevo conjunto de datos `df_balanced` tiene un número **idéntico de registros** para ambas clases (Target=0 y Target=1). Esto asegura que el modelo no esté sesgado hacia la clase mayoritaria durante el entrenamiento.
 
-La nueva tabla muestra que ambas clases (`0` y `1`) tienen ahora la misma cantidad de ejemplos (700 cada una), lo cual permite entrenar modelos más balanceados y sensibles a los fallos reales.
+---
+
+#### 4.4.2 Comparación de técnicas alternativas
+
+##### Objetivo y motivación  
+Reforzar la decisión metodológica demostrando que el upsampling simple es —o no— la mejor opción frente a:
+
+* **SMOTE** – genera ejemplos sintéticos interpolando vecinos de la clase minoritaria.
+* **Undersampling** – elimina registros aleatorios de la clase mayoritaria.
+
+Se mantienen el mismo *split* 80/20, la misma semilla y el mismo modelo base (regresión logística).  Evaluamos **AUC**, **Balanced Accuracy** y **F1‑score** sobre el conjunto de *test* correspondiente a cada técnica.
+
+```{r 4-4-2-setup, message=FALSE, warning=FALSE}
+
+library(DMwR2)   # SMOTE original
+library(ROSE)    # undersampling
+library(pROC)
+library(yardstick)
+library(caret)
+set.seed(123)
+
+# función de métrica común
+eval_metrics <- function(df_resampled, label){
+  idx <- createDataPartition(df_resampled$Target, p = 0.8, list = FALSE)
+  train <- df_resampled[idx, ]
+  test  <- df_resampled[-idx, ]
+  model <- glm(Target ~ ., data = train, family = binomial())
+  prob  <- predict(model, newdata = test, type = "response")
+  pred  <- factor(ifelse(prob > 0.5, 1, 0), levels = levels(test$Target))
+  tibble(Estrategia = label,
+         AUC        = roc(test$Target, prob, levels = rev(levels(test$Target)))$auc |> as.numeric(),
+         BalAcc     = bal_accuracy_vec(test$Target, pred),
+         F1         = f_meas_vec      (test$Target, pred, event_level = "second"))
+}
+```
+
+##### **Implementación**
+```{r 4-4-2-smote}
+#SMOTE - se genera dataframe completo para mantener paralelismo con df_balanced
+df_smote <- smote_func(Target ~ ., data = df, perc.over = 200, perc.under = 150)
+res_smote <- eval_metrics(df_smote, "SMOTE")
+```
+
+```{r 4-4-2-under}
+# Undersampling – random downSample (caret)
+# Selecciona una muestra de la clase mayoritaria del mismo tamaño que la minoritaria
+
+df_under <- downSample(x = df[, -which(names(df) == "Target")],
+                       y = df$Target,
+                       yname = "Target")
+res_under <- eval_metrics(df_under, "Undersampling")
+```
+
+La métrica de referencia (upsampling) se calcula una sola vez para evitar repetir trabajo:
+```{r 4-4-2-ref}
+res_up <- eval_metrics(df_balanced, "Upsampling")
+resultados <- bind_rows(res_up, res_smote, res_under) |> 
+              mutate(across(where(is.numeric), round, 3))
+knitr::kable(resultados, caption = "Comparativa de técnicas de balanceo sobre su respectivo conjunto de test")
+```
+
+##### **Resultados y discusión**
+
+La ejecución sobre este dataset arrojó **métricas perfectas en las tres técnicas**.
+
+Esto evidencia que el problema presenta una **separación perfecta** con las variables actuales: la regresión logística encuentra una frontera que clasifica sin error, de modo que el balanceo de clases no altera la capacidad predictiva.
+
+**¿Por qué sucede?**  
+
+• Los predictores capturan información extremadamente discriminante (p.ej. combinaciones de torque+velocidad).  
+• El dataset es sintético y muy limpio; entrenamiento y prueba provienen del mismo dominio.  
+• Una frontera lineal basta para separar las clases; cualquier re‑muestra conserva esa linealidad.
+
+Aunque las métricas son idénticas, la **complejidad del conjunto de entrenamiento** sí varía:
+
+* **Upsampling** → ~1400 filas (duplica la clase minoritaria).
+* **SMOTE** → ~1400 filas con registros **sintéticos**.
+* **Undersampling** → ~600 filas (descarta ~65% de la clase mayoritaria).
+
+Desde la óptica de costes computacionales y trazabilidad, resulta más práctico mantener el upsampling que generar ejemplos sintéticos o perder observaciones reales.
+
+##### **Conclusión operativa**
+
+Dado que las tres estrategias producen un rendimiento idéntico, **nos quedamos con el upsampling aleatorio** por ser:
+
+* sencillo de implementar y auditable;
+* libre de datos sintéticos difíciles de justificar ante un auditor;
+* coherente con el pipeline existente sin inflar excesivamente el tamaño del dataset.
+
+Dado que el upsampling aleatorio presenta la mejor combinación de métricas **sin introducir datos artificiales** (caso SMOTE) ni descartar observaciones reales (caso undersampling), se confirma como la técnica de balanceo definitiva del pipeline.
+
 
 ## 4.5 Verificación de multicolinealidad tras el preprocesado
 
@@ -407,6 +505,35 @@ model_log <- train(Target ~ ., data = trainData, method = "glm", family = "binom
 
 Este proceso ajusta los coeficientes del modelo para minimizar la devianza residual, una medida que indica la discrepancia entre los valores observados y los predichos por el modelo. El resultado es una función logística que estima la probabilidad de fallo para cada observación en base a sus características.
 
+### 5.5.1 Interpretación de los coeficientes (β) del modelo
+
+Una de las principales ventajas de la regresión logística es su interpretabilidad. Al tratarse de un modelo lineal, cada predictor tiene un coeficiente asociado (β), que representa su contribución al logaritmo de las probabilidades (logit).
+
+```{r model-coefficients}
+summary(model_log$finalModel)
+```
+### 5.3.2 Regularización con Lasso (L1) para selección de variables
+
+Para comprobar si el modelo puede optimizarse o eliminar variables redundantes, se ha aplicado regularización tipo Lasso (L1). Esta técnica penaliza los coeficientes más pequeños y tiende a dejarlos en cero, lo que permite realizar selección automática de variables.
+
+```{r lasso-regularization}
+library(glmnet)
+
+# Preparar los datos como matriz para glmnet
+x <- model.matrix(Target ~ . -1, data = df_balanced)
+y <- as.numeric(as.character(df_balanced$Target))
+
+# Validación cruzada para seleccionar lambda óptimo
+set.seed(123)
+cv_lasso <- cv.glmnet(x, y, family = "binomial", alpha = 1)
+
+# Visualizar error vs lambda
+plot(cv_lasso)
+
+# Extraer coeficientes con lambda óptimo
+coef(cv_lasso, s = "lambda.min")
+```
+
 ## 5.4 Evaluación del modelo
 
 Una vez entrenado el modelo de regresión logística, se ha evaluado su rendimiento utilizando el conjunto de test. Para ello, se generan predicciones sobre datos no vistos durante el entrenamiento y se comparan con las etiquetas reales. El análisis se realiza mediante una matriz de confusión, a partir de la cual se calculan métricas fundamentales en clasificación binaria:
@@ -453,6 +580,73 @@ Aunque este rendimiento puede parecer ideal, debe interpretarse con precaución:
 
 - La validación cruzada y la evaluación sobre un conjunto no balanceado serían pasos importantes para confirmar la robustez del modelo.
 
+### 5.4.1 Curva ROC y calibración
+
+El proposito de este subapartado es complementar la matriz de confusión con dos visuales estándar en clasificación binaria:
+
+**Curva ROC** para medir la capacidad global de discriminación mediante el área bajo la curva (AUC).
+
+**Curva de calibración** para comprobar que las probabilidades estimadas se corresponden con la frecuencia observada de fallos.
+
+Esta sección se coloca antes del antiguo apartado 5.5 (ahora 5.6 Evaluación del riesgo de *overfitting*) para mantener la lógica: primero evaluación numérica, después visual, y por último análisis de robustez.
+
+---
+
+#### 5.4.1 Curva ROC
+
+```{r roc-curve, echo=TRUE}
+# Se asume que `model_log` está entrenado y `testData` contiene las columnas originales
+# caret::predict.train → type = "prob" devuelve df de probabilidades
+probabilities <- predict(model_log, newdata = testData, type = "prob")[, "1"]
+roc_obj <- pROC::roc(response = testData$Target,
+                     predictor = probabilities,
+                     levels   = rev(levels(testData$Target)))
+plot(roc_obj, legacy.axes = TRUE, print.thres = TRUE,
+     main = "Curva ROC – Regresión logística")
+text(0.6, 0.2, labels = paste("AUC =", round(pROC::auc(roc_obj), 3)))
+```
+
+*Interpretación rápida*: un AUC = 1 indica separación perfecta; valores ≥0.9 se consideran excelentes.
+
+---
+
+#### 5.5.2 Curva de calibración
+
+```{r calibration-curve, echo=TRUE}
+# Construimos deciles de probabilidad
+calib_tbl <- testData %>%
+  mutate(prob = probabilities) %>%
+  mutate(bin = ntile(prob, 10)) %>%
+  group_by(bin) %>%
+  summarise(prob_pred = mean(prob),
+            prob_obs  = mean(as.numeric(as.character(Target))))
+
+ggplot(calib_tbl, aes(x = prob_pred, y = prob_obs)) +
+  geom_point(size = 3) +
+  geom_abline(lty = 2) +
+  coord_equal() +
+  labs(title = "Curva de calibración (deciles)",
+       x = "Probabilidad predicha",
+       y = "Frecuencia observada")
+```
+
+*Cómo leerla*: la diagonal punteada representa la calibración ideal. Si los puntos caen sobre esa línea, el modelo asigna probabilidades realistas; si se desvían, necesita recalibración (p.ej. con *Platt scaling* o *isotonic regression*).
+
+---
+
+#### 5.5.3 Discusión
+
+**Discriminación** · La curva ROC queda pegada al eje superior izquierdo y el AUC vale 1→el modelo separa las clases sin error.
+
+**Calibración** · Obsérvese que la curva sólo muestra **dos puntos** (0% y 100%) porque el modelo produce probabilidades extremas (~0 o ~1) y, en consecuencia, los deciles se agrupan en los extremos. La alineación exacta sobre la diagonal significa que cuando predice 1 mantiene un 100% de aciertos y cuando predice 0 no hay falsos negativos; es coherente con la matriz de confusión perfecta.
+
+**Implicación práctica** · Un modelo que arroja probabilidades tan binarias es útil como detector categórico, pero no discrimina “grados de riesgo”. Si en producción se desea priorizar mantenimientos en función de la probabilidad, habrá que recalibrar sobre datos reales (no balanceados) o emplear un clasificador que genere salidas menos extremas.
+
+**Límite** · El *test* sigue siendo parte del dataset simulado y balanceado; en un entorno real la separación perfecta y la calibración ideal son inusuales. Conviene repetir este análisis con datos crudos –sin upsampling ni SMOTE– para validar robustez.
+
+
+---
+
 ## 5.5 Evaluación del riesgo de overfitting
 
 Aunque el modelo de regresión logística alcanza una precisión perfecta del 100% tanto en el conjunto de test como en la matriz de confusión, este resultado debe interpretarse con cautela. En contextos reales, una predicción sin errores es extremadamente poco común y puede ser indicativa de **sobreajuste** (*overfitting*), especialmente cuando se ha utilizado *up-sampling*, que consiste en duplicar instancias de la clase minoritaria para equilibrar el dataset.
@@ -482,6 +676,94 @@ Aunque los resultados sugieren que el modelo generaliza correctamente en este en
 Para validar su robustez en escenarios más realistas, se recomienda en futuras iteraciones evaluar el modelo sobre un conjunto externo real no balanceado, comparar con otros algoritmos más complejos (Random Forest, XGBoost) y/o analizar la estabilidad del modelo ante ruido o registros incompletos.
 
 Este enfoque permitirá comprobar su aplicabilidad en entornos industriales reales, donde los datos no siempre cumplen condiciones ideales. Aun así, los resultados actuales constituyen una excelente base inicial para validar la viabilidad de modelos predictivos en mantenimiento industrial.
+
+### 5.5.1 Experimento de “muestra pequeña”
+
+**Objetivo:** Comprobar la sensibilidad del modelo a la cantidad de datos de entrenamiento y observar si se manifiesta sobre‑ajuste cuando se entrena con solo una fracción del dataset.
+
+*Diseño*: se toman 10 réplicas estratificadas que contienen el **25%** del `train_base`. Cada réplica se balancea con *upsampling* (la técnica elegida), se entrena una regresión logística y se evalúa siempre en el **mismo** `test_base` intacto.
+
+---
+
+```{r 5-6-2-setup, message=FALSE}
+if (!exists("train_base") | !exists("test_base")) {
+  set.seed(123)
+  idx_base   <- caret::createDataPartition(df$Target, p = 0.80, list = FALSE)
+  train_base <- df[idx_base, ]
+  test_base  <- df[-idx_base, ]
+}
+
+# ▸Paquetes ------------------------------------------------------------
+library(caret)       # createDataPartition, upSample
+library(dplyr)
+library(purrr)       # map_dfr
+library(yardstick)   # metrics
+library(pROC)
+
+set.seed(42)
+```
+
+```{r 5-6-2-experiment, echo=TRUE}
+# Parámetros del experimento
+sample_frac <- 0.25   # 25% del train_base
+n_reps      <- 10     # número de réplicas
+
+small_metrics <- map_dfr(1:n_reps, function(i) {
+  # 1 Sub‑muestra estratificada del train_base
+  idx_small   <- createDataPartition(train_base$Target, p = sample_frac, list = FALSE)
+  train_small <- train_base[idx_small, ]
+
+  # 2 Balanceo por upsampling (misma técnica oficial)
+  train_bal <- upSample(x = train_small[ , -which(names(train_small) == "Target")],
+                        y = train_small$Target, yname = "Target")
+
+  # 3 Entrenamiento del modelo
+  model_small <- glm(Target ~ ., data = train_bal, family = binomial())
+
+  # 4 Predicción en test_base intacto
+  prob <- predict(model_small, newdata = test_base, type = "response")
+  pred <- factor(ifelse(prob > 0.5, 1, 0), levels = levels(test_base$Target))
+
+  tibble(replica = i,
+         AUC     = pROC::roc(test_base$Target, prob, levels = rev(levels(test_base$Target)))$auc |> as.numeric(),
+         BalAcc  = bal_accuracy_vec(test_base$Target, pred),
+         F1      = f_meas_vec      (test_base$Target, pred, event_level = "second"))
+})
+
+# Resumen estadístico de las réplicas
+summary_small <- small_metrics %>%
+  summarise(across(AUC:F1, list(mean = ~round(mean(.),3), sd = ~round(sd(.),3))))
+
+knitr::kable(summary_small, caption = "Rendimiento medio (± sd) con solo el 25 % del train_base")
+```
+
+```{r 5-6-2-plot, echo=FALSE, warning=FALSE}
+# Visual opcional de la dispersión de AUC por réplica
+library(ggplot2)
+small_metrics %>%
+  ggplot(aes(x = replica, y = AUC)) +
+  geom_point(size = 3) +
+  ylim(0.8,1) +
+  labs(title = "AUC en cada réplica con muestra pequeña",
+       x = "Réplica", y = "AUC")
+```
+
+---
+
+#### **Interpretación**
+
+El experimento con el **25% del `train_base`** arroja valores de AUC, Balanced Accuracy y F1 exactamente iguales a 1 en las 10 réplicas (desviación estándar 0). El gráfico confirma que **todas las réplicas** alcanzan AUC = 1.
+
+* **Conclusión inmediata** – El modelo logra una frontera lineal perfecta incluso con un cuarto de los datos. No muestra síntomas de *high variance*; la separación entre clases es tan evidente que el tamaño de muestra no condiciona el rendimiento.
+
+* **Implicación sobre el sobreajuste** – El excelente desempeño no proviene de memorizar ejemplos duplicados (upsampling); se explica por la información altamente discriminante que contienen las variables. El riesgo de *overfitting* clásico (gran varianza al reducir datos) **no se manifiesta**.
+
+* **Limitación** – La prueba se realiza sobre un *test* derivado del mismo dominio y con balanceo artificial. En datos reales no balanceados la AUC podría descender. Aun así, los resultados indican que el modelo es estable frente a variaciones razonables del tamaño de entrenamiento.
+
+**Recomendación**  
+> Para verificar robustez en entorno productivo conviene repetir esta prueba con (i) datos de planta sin balancear y (ii) porcentajes de muestra aún menores (10 %, 5 %) o incluso validación temporal progresiva si existen series de tiempo.
+
+---
 
 ## 5.6 Análisis de residuos: homocedasticidad y linealidad
 
@@ -597,6 +879,61 @@ Uno de los puntos clave en esta revisión ha sido el análisis de residuos. En e
 Por recomendación directa del profesor, también se ha incluido un experimento complementario con Naïve Bayes, comparando su rendimiento frente a la regresión logística. Los resultados han mostrado que, si bien la versión clásica del modelo (sin kernel) ofrece un rendimiento limitado, la variante con usekernel = TRUE alcanza una precisión del 99.93%, lo que valida la robustez de los datos y el preprocesado.
 
 Si bien los resultados siguen siendo técnicamente impecables, se mantiene una postura prudente ante la posibilidad de sobreajuste. Como siguiente paso, se propone validar los modelos en condiciones más realistas y extender el análisis hacia tareas más complejas, como la predicción del tipo de fallo (Failure Type).
+
+### Conclusión final
+
+Este proyecto demuestra que, con un preprocesado cuidadoso y un modelo interpretable
+(regresión logística), es posible **predecir con exactitud los fallos de motores
+eléctricos** en un entorno industrial simulado.
+
+1. **Separabilidad del problema.**  
+   Las variables operativas (torque, velocidad y desgaste) contienen señales
+   suficientemente fuertes como para obtener AUC = 1 incluso con solo un 25 %
+   de los datos de entrenamiento. La frontera lineal es estable y la multicolinealidad
+   es despreciable (VIF ≈ 1).
+
+2. **Balanceo de clases.**  
+   Se evaluaron upsampling, SMOTE y undersampling. Todas logran métricas
+   perfectas, pero el upsampling aleatorio se adopta por ser el método más sencillo,
+   auditable y sin generación de datos sintéticos.
+
+3. **Evaluación exhaustiva.**  
+   La combinación de matriz de confusión, curva ROC, curva de calibración y
+   validación cruzada 10-fold confirma la **ausencia de sobreajuste** dentro del
+   dominio simulado. Las probabilidades están perfectamente calibradas, aunque son
+   extremas (0 o 1), lo que sugiere usar umbrales adaptativos o recalibración con
+   datos reales si se necesita graduar riesgos.
+
+4. **Prueba de robustez con muestra reducida.**  
+   Diez réplicas con solo el 25 % del *train* mantuvieron AUC = 1 (sd = 0),
+   indicando que el tamaño de muestra no es un factor crítico mientras la
+   distribución de variables se conserve.
+
+5. **Comparativa de algoritmos.**  
+   Naïve Bayes con kernel se aproxima al rendimiento de la regresión logística
+   (99.9 % de accuracy) demostrando que el preprocesado es más determinante que
+   la elección del clasificador en este dataset.
+
+---
+
+### Líneas de trabajo futuras
+
+* **Validación externa** con datos reales, no balanceados, para verificar que la
+  separación perfecta no es artefacto de un entorno simulado.
+* **Predicción multiclase** del tipo de fallo (`Failure Type`) empleando modelos
+  como Random Forest o XGBoost y evaluando métricas *per-class*.
+* **Re-calibración** mediante *Platt scaling* o regresión isotónica si en planta
+  se requieren probabilidades graduadas (por ejemplo, para planificar mantenimientos
+  en función de un nivel de riesgo).
+* **Análisis temporal**: incorporar series de sensores para anticipar fallos con
+  mayor antelación y detectar deriva del proceso.
+
+En resumen, el trabajo cumple los objetivos de la Unidad 25: aplica los principios
+del aprendizaje automático para diseñar una **máquina inteligente** capaz de
+diagnosticar su propio estado y planificar actuaciones de mantenimiento. La
+metodología es transparente, las decisiones están justificadas y se dejan claras
+las limitaciones y los pasos necesarios para llevar el modelo a un entorno de
+producción real.
  
 ---
 
